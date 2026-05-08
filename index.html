@@ -24,7 +24,7 @@
 </div>
 </div><div class="topbar"><img src="escudo.png" alt="" onerror="this.style.display='none'"><div><div class="tb-t1">Municipalidad de Chascomus</div><div 
 class="tb-t2">Sistema de Actas Digitales</div></div><div class="tb-insp" id="tb-insp"><div class="tb-insp-name" id="tb-name"></div><div class="tb-insp-area" id="tb-area"></div><button 
-class="tb-edit-btn" onclick="editPerfil()">Editar perfil</button><button class="tb-edit-btn" onclick="logOut()" style="margin-top:2px;color:#ff9999">Cerrar sesion</button></div></div><div 
+class="tb-edit-btn" onclick="editPerfil()">Editar perfil</button><button id="tb-admin-btn" class="tb-edit-btn" onclick="openBackoffice()" style="display:none;background:rgba(255,180,0,.18);color:#ffd166">Usuarios</button><button class="tb-edit-btn" onclick="logOut()" style="margin-top:2px;color:#ff9999">Cerrar sesion</button></div></div><div 
 class="sel-wrap"><div class="area-tabs"><button class="atab" data-area="hab" onclick="setArea('hab')">Habilitaciones</button><button 
 class="atab" data-area="obr" onclick="setArea('obr')">Obras Privadas</button><button 
 class="atab" data-area="seg" onclick="setArea('seg')">Seguridad Urbana</button><button 
@@ -483,4 +483,48 @@ if('serviceWorker' in navigator){
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
 }
 </script>
+
+<!-- ── BACKOFFICE ── -->
+<div id="backoffice-overlay" class="bo-overlay" style="display:none">
+<div class="bo-card">
+  <div class="bo-hdr">
+    <span class="bo-htitle">Gestión de Usuarios</span>
+    <button class="bo-hclose" onclick="closeBackoffice()">✕</button>
+  </div>
+  <div class="bo-toolbar">
+    <button class="bo-btn bo-primary" onclick="boShowForm(null)">+ Nuevo usuario</button>
+    <button class="bo-btn" onclick="boExport()">↓ Exportar</button>
+    <label class="bo-btn" style="cursor:pointer">↑ Importar<input type="file" accept=".json" onchange="boImport(event)" style="display:none"></label>
+  </div>
+  <div id="bo-form-wrap" class="bo-form" style="display:none">
+    <div class="bo-form-title" id="bo-form-title">Nuevo usuario</div>
+    <div class="bo-row">
+      <div class="bo-f" style="flex:2"><label>Nombre completo *</label><input id="bo-f-nombre" type="text" placeholder="Ej: Juan Perez" autocomplete="off"></div>
+      <div class="bo-f" style="max-width:90px"><label>Legajo</label><input id="bo-f-legajo" type="text" inputmode="numeric" autocomplete="off"></div>
+    </div>
+    <div class="bo-row">
+      <div class="bo-f"><label>Área *</label>
+        <select id="bo-f-area">
+          <option value="hab">Habilitaciones</option>
+          <option value="obr">Obras Privadas</option>
+          <option value="seg">Seguridad Urbana</option>
+          <option value="amb">Ambiente</option>
+          <option value="bro">Bromatologia</option>
+        </select>
+      </div>
+      <div class="bo-f"><label>Cargo</label><input id="bo-f-cargo" type="text" placeholder="Ej: Inspector Municipal" autocomplete="off"></div>
+    </div>
+    <div class="bo-row">
+      <div class="bo-f"><label id="bo-clave-lbl">Clave *</label><input id="bo-f-clave" type="password" placeholder="Nueva clave" autocomplete="new-password"></div>
+      <div class="bo-f"><label>Confirmar clave</label><input id="bo-f-clave2" type="password" placeholder="Repetir clave" autocomplete="new-password"></div>
+    </div>
+    <div id="bo-err" class="bo-err"></div>
+    <div class="bo-form-btns">
+      <button class="bo-btn bo-primary" onclick="boSaveUser()">Guardar</button>
+      <button class="bo-btn" onclick="document.getElementById('bo-form-wrap').style.display='none'">Cancelar</button>
+    </div>
+  </div>
+  <div id="bo-table" class="bo-table-wrap"></div>
+</div>
+</div>
 </body></html>

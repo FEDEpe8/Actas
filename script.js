@@ -32,16 +32,23 @@ function isCanvasBlank(cv){return!cv.getContext('2d').getImageData(0,0,cv.width,
 
 function normNombre(s){return s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');}
 
+// ── USUARIOS (localStorage + fallback a INSPECTORES) ──
+function getUsers(){
+  try{var s=JSON.parse(localStorage.getItem('users_db'));if(s&&s.length)return s;}catch(e){}
+  return INSPECTORES.map(function(ins){return Object.assign({},ins);});
+}
+function saveUsers(u){localStorage.setItem('users_db',JSON.stringify(u));}
+
 function findInspector(nombre,clave){
   if(normNombre(nombre)===normNombre(SUP_USER)&&clave===SUP_PASS)
     return{nombre:'Supervisor',legajo:'0000',area:'all',cargo:'Supervisor',clave:SUP_PASS};
-  return INSPECTORES.find(function(ins){return normNombre(ins.nombre)===normNombre(nombre)&&ins.clave===clave;})||null;
+  return getUsers().find(function(ins){return normNombre(ins.nombre)===normNombre(nombre)&&ins.clave===clave;})||null;
 }
 
 // Pre-carga la firma cuando el usuario escribe su nombre
 function onNombreInput(){
   var nombre=document.getElementById('l-nombre').value.trim();
-  var found=INSPECTORES.find(function(ins){return normNombre(ins.nombre)===normNombre(nombre);});
+  var found=getUsers().find(function(ins){return normNombre(ins.nombre)===normNombre(nombre);});
   if(found){
     var saved=localStorage.getItem('firma_'+found.legajo);
     if(saved){
@@ -105,6 +112,8 @@ function applyLogin(insp){
     if(insp.area==='all'){tab.style.display='';}
     else{tab.style.display=(tab.dataset.area===insp.area)?'':'none';}
   });
+  var ab=document.getElementById('tb-admin-btn');
+  if(ab)ab.style.display=insp.area==='all'?'block':'none';
   setArea(insp.area==='all'?'hab':insp.area);
 }
 
@@ -263,6 +272,23 @@ async function captureActa(){
         inp.style.webkitTextFillColor='#1a1a2e';
         inp.style.color='#1a1a2e';
         inp.style.boxShadow='0 0 0 1000px #ffffff inset';
+      });
+
+      // Fix campos .f: html2canvas no renderiza texto en inputs normales,
+      // reemplazar con spans que muestran el valor como texto visible
+      clonedEl.querySelectorAll('.f').forEach(function(fEl){
+        fEl.querySelectorAll('input:not([type=checkbox]):not([type=radio])').forEach(function(inp){
+          var span=clonedDoc.createElement('span');
+          span.textContent=inp.value||'';
+          span.style.cssText='display:block;font-size:13px;color:#1a1a2e;padding:5px 2px;border-bottom:1.5px solid #e0e0e0;width:100%;word-break:break-word;font-family:inherit;min-height:23px;box-sizing:border-box;';
+          inp.parentNode.replaceChild(span,inp);
+        });
+        fEl.querySelectorAll('textarea').forEach(function(ta){
+          var div=clonedDoc.createElement('div');
+          div.textContent=ta.value||'';
+          div.style.cssText='font-size:12px;color:#1a1a2e;border:1.5px solid #e0e0e0;border-radius:8px;padding:8px;white-space:pre-wrap;word-break:break-word;line-height:1.5;font-family:inherit;width:100%;box-sizing:border-box;min-height:100px;';
+          ta.parentNode.replaceChild(div,ta);
+        });
       });
 
       // Fix nombre inspector y aclaraciones: reemplazar input por div para evitar corte
@@ -456,6 +482,153 @@ async function descargar(){
   }
   btn.disabled=false;btn.textContent='Descargar PDF';
 }
+
+// ── BACKOFFICE ──────────────────────────────────────────────────
+var _boEditLegajo=null;
+
+function openBackoffice(){
+  _boEditLegajo=null;
+  document.getElementById('bo-form-wrap').style.display='none';
+  document.getElementById('bo-err').textContent='';
+  boRenderTable();
+  document.getElementById('backoffice-overlay').style.display='flex';
+}
+function closeBackoffice(){document.getElementById('backoffice-overlay').style.display='none';}
+
+function _escH(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function _escA(s){return String(s||'').replace(/'/g,'&#39;');}
+
+function boRenderTable(){
+  var users=getUsers();
+  var areaColors={hab:'#1a6bb5',obr:'#b7770d',seg:'#7b2d8b',amb:'#2d8b4a',bro:'#c05a39'};
+  var html='';
+  if(!users.length){
+    html='<div class="bo-empty">No hay usuarios registrados. Creá el primero.</div>';
+  } else {
+    html='<table class="bo-table"><thead><tr><th>Nombre</th><th>Área</th><th>Cargo</th><th style="text-align:center">Firma</th><th>Acciones</th></tr></thead><tbody>';
+    users.forEach(function(u){
+      var aLabel=AREAS[u.area]?AREAS[u.area].label:u.area;
+      var aColor=areaColors[u.area]||'#555';
+      var hasFirma=!!localStorage.getItem('firma_'+u.legajo);
+      html+='<tr>'
+        +'<td><strong>'+_escH(u.nombre)+'</strong><br><span style="font-size:10px;color:#aaa">Leg. '+_escH(u.legajo)+'</span></td>'
+        +'<td><span class="bo-badge" style="background:'+aColor+'22;color:'+aColor+'">'+_escH(aLabel)+'</span></td>'
+        +'<td style="color:#666">'+_escH(u.cargo)+'</td>'
+        +'<td style="text-align:center">'+(hasFirma?'<span style="color:#2d8b4a;font-size:15px">✓</span>':'<span style="color:#ddd">—</span>')+'</td>'
+        +'<td><div class="bo-td-actions">'
+          +'<button class="bo-btn-edit" onclick="boShowForm(\''+_escA(u.legajo)+'\')">Editar</button>'
+          +(hasFirma?'<button class="bo-btn-clr" onclick="boClearFirma(\''+_escA(u.legajo)+'\')">Firma</button>':'')
+          +'<button class="bo-btn-del" onclick="boDeleteUser(\''+_escA(u.legajo)+'\')">Eliminar</button>'
+        +'</div></td>'
+      +'</tr>';
+    });
+    html+='</tbody></table>';
+  }
+  document.getElementById('bo-table').innerHTML=html;
+}
+
+function boNextLegajo(){
+  var users=getUsers();
+  if(!users.length)return'1001';
+  var max=Math.max.apply(null,users.map(function(u){return parseInt(u.legajo)||0;}));
+  return String(max+1);
+}
+
+function boShowForm(legajo){
+  _boEditLegajo=legajo||null;
+  var users=getUsers();
+  var u=legajo?users.find(function(x){return x.legajo===legajo;}):null;
+  document.getElementById('bo-form-title').textContent=u?'Editar usuario':'Nuevo usuario';
+  document.getElementById('bo-f-nombre').value=u?u.nombre:'';
+  document.getElementById('bo-f-legajo').value=u?u.legajo:boNextLegajo();
+  document.getElementById('bo-f-legajo').readOnly=!!u;
+  document.getElementById('bo-f-area').value=u?u.area:'hab';
+  document.getElementById('bo-f-cargo').value=u?u.cargo:'';
+  document.getElementById('bo-f-clave').value='';
+  document.getElementById('bo-f-clave2').value='';
+  document.getElementById('bo-f-clave').placeholder=u?'Dejar vacío para no cambiar':'Nueva clave';
+  document.getElementById('bo-clave-lbl').textContent=u?'Nueva clave (opcional)':'Clave *';
+  document.getElementById('bo-err').textContent='';
+  var fw=document.getElementById('bo-form-wrap');
+  fw.style.display='block';
+  fw.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function boSaveUser(){
+  var nombre=document.getElementById('bo-f-nombre').value.trim();
+  var legajo=document.getElementById('bo-f-legajo').value.trim();
+  var area=document.getElementById('bo-f-area').value;
+  var cargo=document.getElementById('bo-f-cargo').value.trim();
+  var clave=document.getElementById('bo-f-clave').value;
+  var clave2=document.getElementById('bo-f-clave2').value;
+  var errEl=document.getElementById('bo-err');
+  if(!nombre||!legajo||!area){errEl.textContent='Nombre, legajo y área son obligatorios';return;}
+  if(clave&&clave!==clave2){errEl.textContent='Las claves no coinciden';return;}
+  if(!_boEditLegajo&&!clave){errEl.textContent='La clave es obligatoria para un nuevo usuario';return;}
+  var users=getUsers();
+  if(_boEditLegajo){
+    var idx=users.findIndex(function(u){return u.legajo===_boEditLegajo;});
+    if(idx<0){errEl.textContent='Usuario no encontrado';return;}
+    users[idx].nombre=nombre;users[idx].area=area;users[idx].cargo=cargo;
+    if(clave)users[idx].clave=clave;
+  } else {
+    if(users.find(function(u){return u.legajo===legajo;})){errEl.textContent='Ya existe un usuario con ese legajo';return;}
+    users.push({nombre:nombre,legajo:legajo,area:area,cargo:cargo,clave:clave});
+  }
+  var wasEdit=!!_boEditLegajo;
+  saveUsers(users);
+  document.getElementById('bo-form-wrap').style.display='none';
+  _boEditLegajo=null;
+  boRenderTable();
+  toast(wasEdit?'Usuario actualizado':'Usuario creado');
+}
+
+function boDeleteUser(legajo){
+  if(!confirm('¿Eliminar este usuario? Esta acción no se puede deshacer.'))return;
+  saveUsers(getUsers().filter(function(u){return u.legajo!==legajo;}));
+  boRenderTable();
+  toast('Usuario eliminado');
+}
+
+function boClearFirma(legajo){
+  if(!confirm('¿Borrar la firma guardada de este usuario?'))return;
+  localStorage.removeItem('firma_'+legajo);
+  boRenderTable();
+  toast('Firma eliminada');
+}
+
+function boExport(){
+  var data=JSON.stringify(getUsers(),null,2);
+  var blob=new Blob([data],{type:'application/json'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='usuarios-actas-'+new Date().toISOString().slice(0,10)+'.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Exportado correctamente');
+}
+
+function boImport(e){
+  var file=e.target.files[0];if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(ev){
+    try{
+      var users=JSON.parse(ev.target.result);
+      if(!Array.isArray(users)||!users.length)throw new Error('Formato inválido');
+      if(!confirm('Esto reemplazará los '+users.length+' usuarios del archivo. ¿Continuar?'))return;
+      saveUsers(users);boRenderTable();toast('Importados '+users.length+' usuarios');
+    }catch(err){alert('Error al importar: '+err.message);}
+  };
+  reader.readAsText(file);
+  e.target.value='';
+}
+// ────────────────────────────────────────────────────────────────
+
+// ── AUTO-RESIZE TEXTAREAS ──
+function autoResizeTa(ta){ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';}
+document.querySelectorAll('.f textarea').forEach(function(ta){
+  ta.addEventListener('input',function(){autoResizeTa(this);});
+});
 
 // ── INIT ──
 checkLogin();
