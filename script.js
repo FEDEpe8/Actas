@@ -1,475 +1,522 @@
-// ── CONFIG ──
-const AREAS={hab:{label:'Habilitaciones',tipos:['ac','ai']},obr:{label:'Obras Privadas',tipos:['oi','ins']},seg:{label:'Seguridad Urbana',tipos:['sc','si','st']},amb:{label:'Ambiente',tipos:['aca','aia']},bro:{label:'Bromatologia',tipos:['br']}};
-const TIPOS={ac:{label:'Constatacion',badge:'AC',form:'form-ac',titulo:'Acta de Constatacion',pref:'AC-',dir:'Direccion de Habilitaciones',isig:'s-ac-2'},ai:{label:'Infraccion',badge:'AI',form:'form-ai',titulo:'Acta de Infraccion',pref:'AI-',dir:'Direccion de Habilitaciones',isig:'s-ai-2'},oi:{label:'Infraccion',badge:'OI',form:'form-oi',titulo:'Acta de Infraccion',pref:'OI-',dir:'Direccion de Obras Privadas',isig:'s-oi-2'},ins:{label:'Inspeccion',badge:'INS',form:'form-ins',titulo:'Acta de Inspeccion',pref:'INS-',dir:'Dir. Obras Privadas y Planeamiento',isig:'s-ins-2'},sc:{label:'Constatacion',badge:'SC',form:'form-sc',titulo:'Acta de Constatacion',pref:'SC-',dir:'Direccion de Seguridad Urbana',isig:'s-sc-2'},si:{label:'Infraccion',badge:'SI',form:'form-si',titulo:'Acta de Infraccion',pref:'SI-',dir:'Direccion de Seguridad Urbana',isig:'s-si-2'},st:{label:'Transito',badge:'ST',form:'form-st',titulo:'Acta Unica Infraccion de Transito',pref:'ST-',dir:'Direccion de Seguridad Urbana',isig:'s-st-1'},aca:{label:'Constatacion',badge:'ACA',form:'form-aca',titulo:'Acta de Constatacion',pref:'ACA-',dir:'Dir. Ambiente y Desarrollo Sustentable',isig:'s-aca-2'},aia:{label:'Infraccion',badge:'AIA',form:'form-aia',titulo:'Acta de Infraccion',pref:'AIA-',dir:'Dir. Ambiente y Desarrollo Sustentable',isig:'s-aia-2'},br:{label:'Inspeccion',badge:'BR',form:'form-br',titulo:'Acta de Inspeccion',pref:'BR-',dir:'Dir. Bromatologia y Zoonosis',isig:'s-br-2'}};
-const BARRIOS=['139 Viviendas','30 de Mayo','Acceso Norte','Anahi','Caballito Blanco','Centro','Concordia','Costanera','El Algarrobo','El Hueco','El Porteno','Escribano','Gallo Blanco','Ipora','La Esmeralda','La Noria','Lomas Altas','Los Sauces','Parque Girado','Puerto Chascomus','San Cayetano','San Jose','San Juan Bautista','San Luis','San Miguel','Villa Lujan','Otro'];
-const bH='<option value="">Seleccionar</option>'+BARRIOS.map(b=>'<option>'+b+'</option>').join('');
-['bar-ac','bar-ai','bar-sc','bar-si'].forEach(function(id){var e=document.getElementById(id);if(e)e.innerHTML=bH;});
+// =====================================================================
+// PORTAL MUNICIPAL DE CHASCOMÚS - VERSIÓN DE PRODUCCIÓN (LIMPIA)
+// =====================================================================
 
-var tipo='ac',area='hab';
+// 1. CONEXIÓN CON GOOGLE SHEETS
+const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbycfdmRzFh2LlMiJIlVmayT8jKt3ES9WZcW3hE9Wp9cUlqEbWSAYitQRwE69Yv_oWxQ/exec";
 
-// ── LISTA DE INSPECTORES ──────────────────────────────────────────────────────
-// Agregar/editar los inspectores del municipio en este arreglo.
-// Areas: 'hab'=Habilitaciones, 'obr'=Obras Privadas, 'seg'=Seguridad Urbana,
-// 'amb'=Ambiente, 'bro'=Bromatologia, 'all'=Supervisor (acceso a todas las areas)
-const INSPECTORES=[
-   {nombre:'Maria Paula Campestre',legajo:'1001',area:'amb',cargo:'Inspector Municipal'},
-   {nombre:'Marcelo Javier Zaccheo',legajo:'1002',area:'obr',cargo:'Tec. Superior Obras'},
-   {nombre:'Mariana Arias',legajo:'1003',area:'bro',cargo:'Inspectora Municipal'},
+// 2. MEMORIA DE TRABAJO
+let baseDeDatosMuni = {};
+let sincronizacionPromise = null;
+
+// 3. EL FILTRO MAESTRO (CAMPOS PROHIBIDOS)
+const LISTA_NEGRA = [
+    'styleurl', 'fill', 'fill-opacity', 'stroke', 'stroke-width',
+    'stroke-opacity', 'description', 'icon', 'id', 'color_override',
+    'gx_media_links', '@id', 'name', 'nombre', 'icon-opacity', 'icon-scale',
+    'icon-color', 'icon-anchor', 'icon-offset', 'icon-offset-units', 'icon-rotation', 
+    'icon-rotation-units', 'icon-size', 'icon-size-units', 'description', 'visibility', 'displaymode',
+     'balloonstyle', 'liststyle', 'icon-opacity', 'labelstyle', 'linestyle', 'polystyle', 'balloontext', 'balloonbgcolor', 'balloonbordercolor', 'balloonborderwidth', 'balloonborderopacity', 'balloontextcolor', 'balloontextsize',
+     'listitemtype', 'listitemstate', 'listitemcolor', 'listitembgcolor', 'listitembordercolor', 'listitemborderwidth',
+     'listitemborderopacity', 'listitemtextcolor', 'listitemtextsize'
 ];
-// Credenciales del supervisor (quien puede acceder a todas las areas)
-// IMPORTANTE: Cambiar estas credenciales antes de publicar
-const SUP_USER='admin';
-const SUP_PASS='Ch@scomus2026';
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ── LOGIN ──
-function getInsp(){try{return JSON.parse(localStorage.getItem('insp'));}catch(e){return null;}}
-function saveInsp(d){localStorage.setItem('insp',JSON.stringify(d));}
-
-function checkLogin(){
-  var insp=getInsp();
-  if(insp&&insp.loggedIn){applyLogin(insp);return;}
-  document.getElementById('login-overlay').style.display='flex';
+// =====================================================================
+// SINCRONIZACIÓN INICIAL (idempotente: una sola request en vuelo)
+// =====================================================================
+function sincronizarPortal() {
+    if (sincronizacionPromise) return sincronizacionPromise;
+    sincronizacionPromise = fetch(WEBAPP_URL)
+        .then(r => r.json())
+        .then(data => {
+            baseDeDatosMuni = data || {};
+            console.log("portal-chascomus: Sincronización de datos exitosa.");
+        })
+        .catch(e => {
+            console.warn("portal-chascomus: Trabajando con datos locales del archivo.", e);
+            baseDeDatosMuni = {};
+        });
+    return sincronizacionPromise;
 }
 
-function doLogin(){
-  var nombre=document.getElementById('l-nombre').value.trim();
-  var legajo=document.getElementById('l-legajo').value.trim();
-  var areaVal=document.getElementById('l-area').value;
-  var cargo=document.getElementById('l-cargo').value.trim();
-  var err=document.getElementById('login-err');
-  if(!nombre||!areaVal){err.style.display='block';err.textContent='Completar nombre y area';return;}
-  if(areaVal==='all'){
-    var su=document.getElementById('l-sup-user'),sp=document.getElementById('l-sup-pass');
-    if(!su||su.value.trim()!==SUP_USER||!sp||sp.value!==SUP_PASS){
-      err.style.display='block';err.textContent='Credenciales de supervisor incorrectas';return;
+// Lanzar sincronización al cargar el script (en paralelo, no bloquea capas)
+sincronizarPortal();
+
+// =====================================================================
+// SISTEMA DE FILTRO POR BARRIO
+// =====================================================================
+
+// Almacén de datos de capas filtrables (en memoria)
+const _datosFiltrables  = {}; // { clave: geojson }
+const _layersFiltrables = {}; // { clave: L.layerGroup }
+let   _barrioActivo     = null; // nombre del barrio seleccionado
+
+// Todos los anillos de barrios (para detectar features rurales)
+let _todosLosAnillosBarrios = []; // [ [coord,...], ... ]
+
+// Claves que son rubros (para filtrado cruzado con estado)
+const RUBRO_CLAVES = new Set([
+    'alimentacion','gastronomia','indumentaria','salud','automotor',
+    'construccion','belleza','turismo','hogar','tecnologia','educacion','agro','otros'
+]);
+
+// ── Geometría: punto en polígono (ray casting) ────────────────────────
+function _puntoEnPoligono(px, py, anillo) {
+    let dentro = false;
+    for (let i = 0, j = anillo.length - 1; i < anillo.length; j = i++) {
+        const [xi, yi] = anillo[i];
+        const [xj, yj] = anillo[j];
+        if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi))
+            dentro = !dentro;
     }
-  }
-  err.style.display='none';
-  var sigCv=document.getElementById('login-sig');
-  var firma=sigCv.toDataURL('image/png');
-  var isBlank=!sigCv.getContext('2d').getImageData(0,0,sigCv.width,sigCv.height).data.some(function(x){return x!==0;});
-  var insp={nombre:nombre,legajo:legajo,area:areaVal,cargo:cargo,firma:isBlank?null:firma,loggedIn:true};
-  saveInsp(insp);
-  document.getElementById('login-overlay').style.display='none';
-  applyLogin(insp);
+    return dentro;
 }
 
-function applyLogin(insp){
-  var ti=document.getElementById('tb-insp');
-  ti.style.display='block';
-  document.getElementById('tb-name').textContent=insp.nombre;
-  document.getElementById('tb-area').textContent=AREAS[insp.area]?AREAS[insp.area].label:'Supervisor';
-  document.querySelectorAll('.atab').forEach(function(tab){
-    if(insp.area==='all'){tab.style.display='';}
-    else{tab.style.display=(tab.dataset.area===insp.area)?'':'none';}
-  });
-  setArea(insp.area==='all'?'hab':insp.area);
-}
-
-function editPerfil(){
-  var insp=getInsp()||{};
-  document.getElementById('l-nombre').value=insp.nombre||'';
-  document.getElementById('l-legajo').value=insp.legajo||'';
-  document.getElementById('l-area').value=insp.area||'';
-  document.getElementById('l-cargo').value=insp.cargo||'';
-  var sigCv=document.getElementById('login-sig');
-  var ctx=sigCv.getContext('2d');
-  ctx.clearRect(0,0,sigCv.width,sigCv.height);
-  if(insp.firma){
-    document.getElementById('sig-hint').style.display='none';
-    var img=new Image();img.onload=function(){ctx.drawImage(img,0,0,sigCv.width,sigCv.height);};img.src=insp.firma;
-  } else {document.getElementById('sig-hint').style.display='flex';}
-  var listSel=document.getElementById('l-inspector-list');
-  if(listSel){listSel.value='manual';setManualVisible(true);}
-  if(typeof onAreaChange==='function')onAreaChange();
-  document.getElementById('login-overlay').style.display='flex';
-}
-
-function logOut(){localStorage.removeItem('insp');location.reload();}
-
-// ── PREFILL INSPECTOR ──
-function prefillInspector(){
-  var insp=getInsp();
-  if(!insp||!insp.nombre)return;
-  var T=TIPOS[tipo];
-  var sigId=T.isig;
-  if(!sigId)return;
-  var cv=document.getElementById(sigId);
-  if(!cv)return;
-  var aclInp=document.getElementById(sigId+'-acl');
-  if(aclInp){
-    var txt=insp.nombre;
-    if(insp.cargo)txt+=' - '+insp.cargo;
-    aclInp.defaultValue=txt;
-    if(!aclInp.value||aclInp.value===aclInp._lastPrefill)aclInp.value=txt;
-    aclInp._lastPrefill=txt;
-  }
-  if(insp.firma){
-    var img=new Image();
-    img.onload=function(){
-      var ctx=cv.getContext('2d');
-      var isEmpty=!ctx.getImageData(0,0,cv.width,cv.height).data.some(function(x){return x!==0;});
-      if(isEmpty){ctx.clearRect(0,0,cv.width,cv.height);ctx.drawImage(img,0,0,cv.width,cv.height);}
-    };
-    img.src=insp.firma;
-  }
-  if(tipo==='st'){
-    var el;
-    el=document.getElementById('st-legajo');if(el&&!el.value)el.value=insp.legajo||'';
-    el=document.getElementById('st-nombre');if(el&&!el.value)el.value=insp.nombre||'';
-    el=document.getElementById('st-cargo');if(el&&!el.value)el.value=insp.cargo||'';
-  }
-}
-
-// ── AREA / TIPO ──
-function setArea(a){
-  area=a;
-  document.querySelectorAll('.atab').forEach(function(t){t.classList.toggle('on',t.dataset.area===a);});
-  var row=document.getElementById('tipo-row');
-  row.innerHTML=AREAS[a].tipos.map(function(t){return'<button class="tbn" id="btn-'+t+'" onclick="setTipo(\''+t+'\')">'+'<span class="badge">'+TIPOS[t].badge+'</span><span class="sub">'+TIPOS[t].label+'</span></button>';}).join('');
-  setTipo(AREAS[a].tipos[0]);
-}
-
-function setTipo(t){
-  tipo=t;
-  document.querySelectorAll('.tbn').forEach(function(b){b.className='tbn';});
-  var btn=document.getElementById('btn-'+t);
-  if(btn)btn.className='tbn on-'+t;
-  Object.values(TIPOS).forEach(function(v){document.getElementById(v.form).classList.add('hidden');});
-  document.getElementById(TIPOS[t].form).classList.remove('hidden');
-  document.getElementById('titulo-acta').textContent=TIPOS[t].titulo;
-  document.getElementById('num-pref').textContent=TIPOS[t].pref;
-  document.getElementById('hdr-dir').textContent=TIPOS[t].dir;
-  loadNum();
-  document.querySelectorAll('#'+TIPOS[t].form+' .map-canvas').forEach(function(cv){initMapCanvas(cv.id,cv.dataset.style);});
-  setTimeout(prefillInspector,100);
-}
-
-// ── NUMERACION ──
-function getSeq(p){return parseInt(localStorage.getItem('seq_'+p.replace(/-/g,''))||'0');}
-function setSeq(p,n){localStorage.setItem('seq_'+p.replace(/-/g,''),n);}
-function loadNum(){var n=Math.max(1,getSeq(TIPOS[tipo].pref));document.getElementById('num-acta').value=String(n).padStart(6,'0');}
-function nuevaActa(){var n=getSeq(TIPOS[tipo].pref)+1;setSeq(TIPOS[tipo].pref,n);document.getElementById('num-acta').value=String(n).padStart(6,'0');limpiar(false);prefillInspector();toast('Nueva acta N '+String(n).padStart(6,'0'));}
-
-// ── CAPTURA PDF (FIX PRINCIPAL) ─────────────────────────────────────────────
-// html2canvas clona el DOM pero pierde los valores asignados por JavaScript
-// (como el nombre del inspector y el numero de acta).
-// La solucion es usar 'onclone' para sincronizar los valores antes de renderizar.
-function syncDOM(origEl, clonedEl){
-  // Inputs de texto
-  var origInputs=origEl.querySelectorAll('input:not([type=checkbox]):not([type=radio])');
-  var clonInputs=clonedEl.querySelectorAll('input:not([type=checkbox]):not([type=radio])');
-  origInputs.forEach(function(inp,i){
-    if(clonInputs[i]){
-      clonInputs[i].setAttribute('value',inp.value);
-      clonInputs[i].value=inp.value;
+// ── Centroide simple de una feature ───────────────────────────────────
+// Soporta Point, LineString, MultiLineString, Polygon, MultiPolygon
+function _centroide(feature) {
+    const g = feature.geometry;
+    if (!g) return null;
+    let coords;
+    if      (g.type === 'Point')           return g.coordinates;
+    else if (g.type === 'LineString')      coords = g.coordinates;
+    else if (g.type === 'MultiLineString') coords = g.coordinates[0];
+    else if (g.type === 'Polygon')         coords = g.coordinates[0];
+    else if (g.type === 'MultiPolygon')    coords = g.coordinates[0][0];
+    else return null;
+    if (g.type === 'LineString' || g.type === 'MultiLineString') {
+        return coords[Math.floor(coords.length / 2)];
     }
-  });
-  // Textareas
-  var origTas=origEl.querySelectorAll('textarea');
-  var clonTas=clonedEl.querySelectorAll('textarea');
-  origTas.forEach(function(ta,i){
-    if(clonTas[i]){
-      clonTas[i].textContent=ta.value;
-      clonTas[i].value=ta.value;
+    const lng = coords.reduce((s, c) => s + c[0], 0) / coords.length;
+    const lat = coords.reduce((s, c) => s + c[1], 0) / coords.length;
+    return [lng, lat];
+}
+
+// ── Anillo externo del barrio ──────────────────────────────────────────
+function _anillosBarrio(feature) {
+    const g = feature.geometry;
+    if (!g) return [];
+    if (g.type === 'Polygon')
+        return [g.coordinates[0]];
+    if (g.type === 'MultiPolygon')
+        return g.coordinates.map(p => p[0]);
+    if (g.type === 'GeometryCollection')
+        return g.geometries.flatMap(sub => {
+            if (sub.type === 'Polygon')      return [sub.coordinates[0]];
+            if (sub.type === 'MultiPolygon') return sub.coordinates.map(p => p[0]);
+            return [];
+        });
+    return [];
+}
+
+// ── Toast informativo ─────────────────────────────────────────────────
+function _mostrarToast(msg) {
+    let t = document.getElementById('_toast-barrio');
+    if (!t) {
+        t = document.createElement('div');
+        t.id = '_toast-barrio';
+        t.style.cssText = `
+            position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+            background:#18224c; color:#b8d30f; padding:9px 20px;
+            border-radius:20px; font-family:'Barlow',sans-serif;
+            font-size:13px; font-weight:700; letter-spacing:0.5px;
+            box-shadow:0 4px 16px rgba(0,0,0,0.35); z-index:9999;
+            pointer-events:none; transition:opacity 0.4s;
+        `;
+        document.body.appendChild(t);
     }
-  });
-  // Selects
-  var origSels=origEl.querySelectorAll('select');
-  var clonSels=clonedEl.querySelectorAll('select');
-  origSels.forEach(function(sel,i){
-    if(clonSels[i])clonSels[i].selectedIndex=sel.selectedIndex;
-  });
-  // Fix layout en el clon
-  var numBox=clonedEl.querySelector('.num-box');
-  if(numBox){numBox.style.flexShrink='0';numBox.style.minWidth='fit-content';}
-  clonedEl.querySelectorAll('.sign-box').forEach(function(sb){
-    sb.style.width='100%';sb.style.alignItems='stretch';
-  });
-  clonedEl.querySelectorAll('.sig-acl').forEach(function(sa){sa.style.width='100%';});
-  clonedEl.querySelectorAll('.sig-acl input').forEach(function(inp){
-    inp.style.width='100%';inp.style.display='block';
-  });
+    t.textContent = msg;
+    t.style.opacity = '1';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.opacity = '0'; }, 3500);
 }
 
-async function captureActa(){
-  var el=document.getElementById('acta-doc');
-  return await html2canvas(el,{
-    scale:1.5,
-    useCORS:true,
-    allowTaint:true,
-    backgroundColor:'#ffffff',
-    logging:false,
-    width:750,
-    windowWidth:800,
-    scrollX:0,
-    scrollY:0,
-    onclone:function(clonedDoc){
-      var origEl=document.getElementById('acta-doc');
-      var clonedEl=clonedDoc.getElementById('acta-doc');
-      if(!origEl||!clonedEl)return;
-      syncDOM(origEl,clonedEl);
+// ── Renderizar parcelas filtradas dentro de un barrio ─────────────────
+function _renderizarFiltradas(anillos) {
+    let total = 0;
 
-      // Fix numero de acta: reemplazar inputs con un span simple
-      var numBox=clonedEl.querySelector('.num-box');
-      var origPref=document.querySelector('.num-pref');
-      var origNum=document.getElementById('num-acta');
-      if(numBox&&origPref&&origNum){
-        var sp=clonedDoc.createElement('span');
-        sp.textContent=(origPref.textContent||'')+(origNum.value||'');
-        sp.style.cssText='font-size:12px;font-weight:700;color:#1a1a2e;white-space:nowrap';
-        numBox.innerHTML='';
-        numBox.appendChild(sp);
-        numBox.style.flexShrink='0';
-      }
+    // Detectar filtros de estado y rubro activos (capas y map son globales del HTML)
+    let vigsActivo = false, vencActivo = false, hayRubroActivo = false;
+    try {
+        vigsActivo     = typeof capas !== 'undefined' && map.hasLayer(capas.vigentes);
+        vencActivo     = typeof capas !== 'undefined' && map.hasLayer(capas.vencidas);
+        hayRubroActivo = typeof capas !== 'undefined' &&
+            [...RUBRO_CLAVES].some(r => capas[r] && map.hasLayer(capas[r]));
+    } catch(e) { /* seguridad: si map/capas aún no existen, sin filtro cruzado */ }
 
-      // Fix nombre inspector y aclaraciones: reemplazar input por div para evitar corte
-      clonedEl.querySelectorAll('.sig-acl').forEach(function(acl){
-        var inp=acl.querySelector('input');
-        if(!inp)return;
-        var div=clonedDoc.createElement('div');
-        div.textContent=inp.value||'';
-        div.style.cssText='font-size:11px;color:#444;text-align:center;width:100%;white-space:normal;word-break:break-word;padding:2px 4px;box-sizing:border-box';
-        acl.replaceChild(div,inp);
-      });
-    }
-  });
-}
-// ─────────────────────────────────────────────────────────────────────────────
+    for (const clave in _datosFiltrables) {
+        const lg = _layersFiltrables[clave];
+        if (!lg) continue;
+        lg.clearLayers();
 
-// ── MAPA DIBUJABLE ──
-function initMapCanvas(id,style){
-  var cv=document.getElementById(id);
-  if(!cv||cv._mapInited)return;
-  cv._mapInited=true;
-  var ctx=cv.getContext('2d');
-  var W=cv.width,H=cv.height;
-  function drawBg(){
-    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,W,H);
-    if(style==='grid'){
-      ctx.strokeStyle='#e8e8e8';ctx.lineWidth=1;
-      for(var x=W/4;x<W;x+=W/4){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
-      for(var y=H/4;y<H;y+=H/4){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
-    } else if(style==='cross'){
-      var lw=W*0.28;
-      ctx.fillStyle='#f0f0f0';
-      ctx.fillRect(W/2-lw/2,0,lw,H);ctx.fillRect(0,H/2-lw/2,W,lw);
-      ctx.strokeStyle='#d0d0d0';ctx.lineWidth=1;
-      [[W/2-lw/2,0,W/2-lw/2,H],[W/2+lw/2,0,W/2+lw/2,H],[0,H/2-lw/2,W,H/2-lw/2],[0,H/2+lw/2,W,H/2+lw/2]].forEach(function(l){ctx.beginPath();ctx.moveTo(l[0],l[1]);ctx.lineTo(l[2],l[3]);ctx.stroke();});
-    }
-    var fs=Math.round(W*0.06);
-    ctx.fillStyle='#bbb';ctx.font='bold '+fs+'px -apple-system,sans-serif';
-    ctx.textAlign='center';ctx.fillText('N',W/2,fs+6);ctx.fillText('S',W/2,H-6);
-    ctx.textAlign='left';ctx.fillText('O',6,H/2+fs/3);
-    ctx.textAlign='right';ctx.fillText('E',W-6,H/2+fs/3);
-  }
-  drawBg();
-  var bgData=ctx.getImageData(0,0,W,H);
-  var drawing=false,lx=0,ly=0,tool='draw';
-  cv._setTool=function(t){tool=t;};
-  cv._clearMap=function(){ctx.putImageData(bgData,0,0);};
-  function getPos(e){var r=cv.getBoundingClientRect(),sx=W/r.width,sy=H/r.height,s=e.touches?e.touches[0]:e;return[(s.clientX-r.left)*sx,(s.clientY-r.top)*sy];}
-  function down(e){e.preventDefault();drawing=true;var p=getPos(e);lx=p[0];ly=p[1];}
-  function move(e){
-    if(!drawing)return;e.preventDefault();
-    var p=getPos(e);var x=p[0],y=p[1];
-    if(tool==='erase'){
-      var r=W*0.07;
-      var tmp=document.createElement('canvas');tmp.width=W;tmp.height=H;
-      tmp.getContext('2d').putImageData(bgData,0,0);
-      ctx.save();ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.clip();ctx.drawImage(tmp,0,0);ctx.restore();
-    } else {
-      ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';
-      ctx.strokeStyle=tool==='red'?'#e00':'#1a1a2e';
-      ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(x,y);ctx.stroke();
-    }
-    lx=x;ly=y;
-  }
-  function up(){drawing=false;}
-  cv.addEventListener('mousedown',down);cv.addEventListener('mousemove',move);cv.addEventListener('mouseup',up);cv.addEventListener('mouseleave',up);
-  cv.addEventListener('touchstart',down,{passive:false});cv.addEventListener('touchmove',move,{passive:false});cv.addEventListener('touchend',up);cv.addEventListener('touchcancel',up);
-}
+        const esRubro  = RUBRO_CLAVES.has(clave);
+        const esEstado = clave === 'vigentes' || clave === 'vencidas';
 
-function mtool(btn){
-  var mapId=btn.dataset.map,tool=btn.dataset.tool;
-  var cv=document.getElementById(mapId);
-  if(tool==='clear'){if(cv&&cv._clearMap)cv._clearMap();return;}
-  document.querySelectorAll('[data-map="'+mapId+'"]').forEach(function(b){b.classList.remove('on');});
-  btn.classList.add('on');
-  if(cv&&cv._setTool)cv._setTool(tool);
-}
+        // Si es vigentes/vencidas y hay un rubro activo, el rubro ya filtra por estado → no duplicar
+        if (esEstado && hayRubroActivo) continue;
 
-// ── FIRMAS ──
-function initSig(id){
-  var cv=document.getElementById(id);if(!cv)return;
-  var ctx=cv.getContext('2d');var drawing=false,lx=0,ly=0;
-  function pos(e){var r=cv.getBoundingClientRect(),sx=cv.width/r.width,sy=cv.height/r.height,s=e.touches?e.touches[0]:e;return[(s.clientX-r.left)*sx,(s.clientY-r.top)*sy];}
-  function down(e){e.preventDefault();drawing=true;var p=pos(e);lx=p[0];ly=p[1];ctx.beginPath();ctx.moveTo(lx,ly);cv.classList.add('active');}
-  function move(e){if(!drawing)return;e.preventDefault();var p=pos(e);ctx.lineWidth=2.8;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#111';ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(p[0],p[1]);ctx.stroke();lx=p[0];ly=p[1];}
-  function up(){drawing=false;cv.classList.remove('active');}
-  cv.addEventListener('mousedown',down);cv.addEventListener('mousemove',move);cv.addEventListener('mouseup',up);cv.addEventListener('mouseleave',up);
-  cv.addEventListener('touchstart',down,{passive:false});cv.addEventListener('touchmove',move,{passive:false});cv.addEventListener('touchend',up);cv.addEventListener('touchcancel',up);
-}
-document.querySelectorAll('.sig-canvas').forEach(function(c){initSig(c.id);});
-initSig('login-sig');
-function clrSig(id){var cv=document.getElementById(id);if(cv)cv.getContext('2d').clearRect(0,0,cv.width,cv.height);}
+        const filtradas = _datosFiltrables[clave].features.filter(f => {
+            const c = _centroide(f);
+            if (!c) return false;
 
-// ── HELPERS ──
-function tog(sid,iid){var v=document.getElementById(sid).value;var i=document.getElementById(iid);i.style.display=(v==='Otros'||v==='Otro')?'block':'none';if(i.style.display==='none')i.value='';else i.focus();}
+            const enBarrioActual = anillos.some(anillo => _puntoEnPoligono(c[0], c[1], anillo));
 
-function limpiar(doToast){
-  if(doToast===undefined)doToast=true;
-  var f=document.getElementById(TIPOS[tipo].form);
-  f.querySelectorAll('input:not([type=checkbox]):not([type=radio])').forEach(function(el){el.value=el.defaultValue||'';});
-  f.querySelectorAll('textarea').forEach(function(el){el.value='';});
-  f.querySelectorAll('select').forEach(function(el){el.selectedIndex=0;});
-  f.querySelectorAll('input[type=checkbox]').forEach(function(el){el.checked=false;});
-  f.querySelectorAll('input[type=radio]').forEach(function(el){el.checked=false;});
-  f.querySelectorAll('.otro-inp').forEach(function(el){el.style.display='none';});
-  f.querySelectorAll('.sig-canvas').forEach(function(cv){cv.getContext('2d').clearRect(0,0,cv.width,cv.height);});
-  f.querySelectorAll('.map-canvas').forEach(function(cv){if(cv._clearMap)cv._clearMap();});
-  if(doToast)toast('Formulario limpiado');
-}
+            // Para rubros: incluir también features fuera de TODOS los barrios (puntos rurales)
+            if (esRubro && !enBarrioActual) {
+                const esRural = _todosLosAnillosBarrios.length > 0 &&
+                    !_todosLosAnillosBarrios.some(a => _puntoEnPoligono(c[0], c[1], a));
+                if (!esRural) return false; // está en otro barrio, no mostrar
+            } else if (!esRubro && !enBarrioActual) {
+                return false; // capas no-rubro: solo el barrio seleccionado
+            }
 
-// ── TOAST ──
-var _toastT;
-function toast(msg,dur){dur=dur||2500;var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(_toastT);_toastT=setTimeout(function(){t.classList.remove('show');},dur);}
+            // Para capas de rubro: filtrar por estado si hay filtro de estado activo
+            if (esRubro && (vigsActivo || vencActivo)) {
+                const props = f.properties || {};
+                const estadoF = (props.ESTADO || props.estado || '').toUpperCase();
+                if ( vigsActivo && !vencActivo) return estadoF === 'VIGENTE';
+                // vencidas incluye también SIN FECHA (ya están en vencidas.geojson)
+                if (!vigsActivo &&  vencActivo) return estadoF === 'VENCIDA' || estadoF === 'SIN FECHA';
+                // Ambos activos → mostrar todo el rubro sin filtrar
+            }
 
-// ── WHATSAPP ──
-function openWA(){document.getElementById('wa-num').value='';document.getElementById('wa-overlay').classList.add('open');setTimeout(function(){document.getElementById('wa-num').focus();},200);}
-function closeWA(){document.getElementById('wa-overlay').classList.remove('open');}
-function sendWA(){
-  var raw=document.getElementById('wa-num').value.replace(/\D/g,'');
-  if(raw.length<8){alert('Ingresa un numero valido');return;}
-  var num=raw.startsWith('54')?raw:'54'+raw;
-  closeWA();
-  var msg=buildMsg();
-  window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
-  toast('Abriendo WhatsApp...');
-}
+            return true;
+        });
+        total += filtradas.length;
 
-function buildMsg(){
-  var T=TIPOS[tipo],num=document.getElementById('num-acta').value;
-  var insp=getInsp();
-  var lines=['*MUNICIPALIDAD DE CHASCOMUS*','*'+T.dir+'*','*'+T.titulo+' N '+T.pref+num+'*'];
-  if(insp)lines.push('_Inspector: '+insp.nombre+(insp.legajo?' (Leg.'+insp.legajo+')':'')+'_');
-  lines.push('---------------------');
-  var form=document.getElementById(T.form);
-  form.querySelectorAll('.f').forEach(function(f){
-    var lbl=f.querySelector('label');
-    f.querySelectorAll('input:not([type=checkbox]):not([type=radio]):not(.otro-inp),select,textarea').forEach(function(inp){
-      if(lbl&&inp.value&&inp.value.trim()&&inp.value!==inp.defaultValue)lines.push('*'+lbl.textContent.trim()+':* '+inp.value);
+        if (filtradas.length > 0) {
+            L.geoJSON({ type: 'FeatureCollection', features: filtradas }, {
+// ── Puntos: circleMarker coloreado por estado ──────────
+pointToLayer: (feature, latlng) => {
+    const estado = (feature.properties?.ESTADO || feature.properties?.estado || '').toUpperCase();
+    const color  = estado === 'VIGENTE'   ? '#2fc96fff'
+                 : estado === 'VENCIDA'   ? '#c74031ff'
+                 : estado === 'SIN FECHA' ? '#c6742cff'
+                 : '#2b8ccdff';
+    return L.marker(latlng, {
+        icon: L.divIcon({
+            className: 'icono-emoji-transparente',
+            html: `<div style="
+                width: 28px;
+                height: 36px;
+                position: relative;
+            ">
+                <svg viewBox="0 0 28 36" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;">
+                    <path d="M14 0 C6.3 0 0 6.3 0 14 C0 24.5 14 36 14 36 C14 36 28 24.5 28 14 C28 6.3 21.7 0 14 0 Z"
+                          fill="${color}" stroke="#ffffff" stroke-width="2"/>
+                    <circle cx="14" cy="14" r="5" fill="#ffffff" fill-opacity="0.7"/>
+                </svg>
+            </div>`,
+            iconSize:   [20, 32],
+            iconAnchor: [10, 32],
+            popupAnchor:[0, -32]
+        })
     });
-  });
-  form.querySelectorAll('.narr').forEach(function(narr){
-    var parts=[];
-    narr.childNodes.forEach(function(n){if(n.nodeType===3&&n.textContent.trim())parts.push(n.textContent.trim());if(n.tagName==='INPUT'&&n.value)parts.push(n.value);});
-    if(parts.length)lines.push('','*Descripcion:*',parts.filter(Boolean).join(' ').replace(/\s{2,}/g,' '));
-  });
-  var chkd=[];
-  form.querySelectorAll('input[type=checkbox]').forEach(function(cb){if(cb.checked){var row=cb.closest('.chk-row,.dest-row,.chk-inline');if(row){var s=row.querySelector('span');if(s)chkd.push('  - '+s.textContent.trim());}}});
-  if(chkd.length){lines.push('','*Selecciones:*');chkd.forEach(function(c){lines.push(c);});}
-  lines.push('','---------------------','_Sistema de Actas Digitales - Municipalidad de Chascomus_');
-  return lines.join('\n');
-}
-
-// ── PDF ──
-async function descargar(){
-  var btn=document.getElementById('btn-dl');btn.disabled=true;btn.textContent='Generando...';
-  toast('Preparando PDF...',9000);
-  var el=document.getElementById('acta-doc');
-  try{
-    var n=parseInt(document.getElementById('num-acta').value)||1;
-    document.body.classList.add('pdf-mode');
-    el.style.cssText='width:750px!important;min-width:750px!important;max-width:750px!important';
-    window.scrollTo(0,0);
-    await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
-    await new Promise(function(r){setTimeout(r,400);});
-
-    var canvas=await captureActa();
-
-    el.style.cssText='';document.body.classList.remove('pdf-mode');
-    // JPEG 88% — mucho mas liviano que PNG
-    var img=canvas.toDataURL('image/jpeg',0.88);
-    var jsPDF=window.jspdf.jsPDF;
-    var pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-    var pw=210,ph=297;
-    var imgH=(canvas.height*pw)/canvas.width;
-    if(imgH<=ph){
-      // Entra en una sola hoja A4 — alinear arriba
-      pdf.addImage(img,'JPEG',0,0,pw,imgH,'','FAST');
-    } else {
-      // Escalar proporcionalmente para que entre en el alto de A4
-      var fitW=(canvas.width*ph)/canvas.height;
-      pdf.addImage(img,'JPEG',(pw-fitW)/2,0,fitW,ph,'','FAST');
+},          // ── Polígonos y líneas ─────────────────────────────────
+                style: (feature) => {
+                    const t      = feature.geometry?.type || '';
+                    const isLine = t === 'LineString' || t === 'MultiLineString';
+                    const estado = (feature.properties?.ESTADO || feature.properties?.estado || '').toUpperCase();
+                    const fillColor = estado === 'VIGENTE'   ? '#26c267ff'
+                                    : estado === 'VENCIDA'   ? '#bf3e30ff'
+                                    : estado === 'SIN FECHA' ? '#c67229ff'
+                                    : '#2a85c2ff';
+                    return isLine ? {
+                        color: '#e8a020', weight: 2.5, opacity: 0.9
+                    } : {
+                        fillColor, fillOpacity: 0.55, color: '#fff', weight: 1
+                    };
+                },
+                onEachFeature: (feature, layer) => {
+                    const props  = feature.properties || {};
+                    const nom    = props.nombre || props['NOMBRE / COMERCIO'] || props.name || props.CCA || 'Sin nombre';
+                    const estado = (props.ESTADO || props.estado || '').toUpperCase();
+                    const colorHeader = estado === 'VIGENTE'   ? '#28d36fff'
+                                      : estado === 'VENCIDA'   ? '#c53323ff'
+                                      : estado === 'SIN FECHA' ? '#d7741dff'
+                                      : '#18224c';
+                    let html = `
+                        <div style="min-width:220px;font-family:sans-serif;border-radius:8px;overflow:hidden;">
+                            <div style="background:${colorHeader};color:#fff;padding:10px;text-align:center;">
+                                <b style="font-size:13px;">${escHTML(nom)}</b>
+                                ${estado ? `<div style="font-size:10px;opacity:0.85;margin-top:2px;">${estado}</div>` : ''}
+                            </div>
+                            <div style="padding:12px;background:#fff;">
+                    `;
+                    const SKIP = new Set(['name','nombre','styleurl','fill','fill-opacity',
+                                         'stroke','stroke-width','stroke-opacity','icon','id',
+                                         'gx_media_links','@id','estado','descripción','description',
+                                         'icon-opacity','icon-color','icon-scale','icon-offset',
+                                         'icon-offset-units','icon-rotation','icon-size']);
+                    for (const p in props) {
+                        const val = props[p];
+                        if (SKIP.has(p.toLowerCase()) || val === null || val === '' || typeof val === 'object') continue;
+                        html += `<div style="margin-bottom:7px;border-bottom:1px solid #f0f0f0;padding-bottom:4px;">
+                            <span style="font-size:9px;color:#aaa;text-transform:uppercase;font-weight:700;">${escHTML(p)}</span><br>
+                            <span style="font-size:12px;color:#212529;font-weight:600;">${escHTML(String(val))}</span>
+                        </div>`;
+                    }
+                    html += `</div></div>`;
+                    layer.bindPopup(html);
+                }
+            }).addTo(lg);
+        }
     }
-    var numStr=String(n).padStart(6,'0');
-    pdf.save('Acta-'+TIPOS[tipo].pref+numStr+'.pdf');
-    var nextN=n+1;setSeq(TIPOS[tipo].pref,nextN);
-    document.getElementById('num-acta').value=String(nextN).padStart(6,'0');
-    toast('PDF descargado correctamente');
-  }catch(err){
-    el.style.cssText='';document.body.classList.remove('pdf-mode');
-    console.error(err);toast('Error al generar PDF');
-  }
-  btn.disabled=false;btn.textContent='Descargar PDF';
+    return total;
 }
 
-// ── LISTA DE INSPECTORES (UI) ──
-function buildLoginExtras(){
-  if(INSPECTORES.length>0){
-    var lw=document.createElement('div');lw.className='lf';
-    lw.innerHTML='<label>Inspector</label><select id="l-inspector-list" aria-label="Inspector"><option value="">— Seleccionar inspector —</option>'+INSPECTORES.map(function(ins,i){return'<option value="'+i+'">'+ins.nombre+' — '+(AREAS[ins.area]?AREAS[ins.area].label:ins.area)+'</option>';}).join('')+'<option value="manual">Otro / Ingresar manualmente...</option></select>';
-    var nm=document.getElementById('l-nombre').closest('.lf');
-    nm.parentNode.insertBefore(lw,nm);
-    document.getElementById('l-inspector-list').addEventListener('change',function(){onInspSelect(this.value);});
-    setManualVisible(false);
-  }
-  var sw=document.createElement('div');sw.id='l-sup-wrap';sw.style.display='none';
-  sw.innerHTML='<div class="lf"><label>Usuario supervisor</label><input id="l-sup-user" type="text" autocomplete="off"></div><div class="lf"><label>Clave supervisor</label><input id="l-sup-pass" type="password" autocomplete="off"></div>';
-  var sigLbl=document.querySelector('.lf-sig-lbl');
-  sigLbl.parentNode.insertBefore(sw,sigLbl);
-  document.getElementById('l-area').addEventListener('change',onAreaChange);
+// ── Limpiar filtro ────────────────────────────────────────────────────
+function _limpiarFiltro() {
+    _barrioActivo = null;
+    for (const clave in _layersFiltrables) {
+        _layersFiltrables[clave]?.clearLayers();
+    }
+    _mostrarToast('🔄 Filtro eliminado');
 }
 
-function setManualVisible(v){
-  ['l-nombre','l-legajo','l-cargo'].forEach(function(id){var w=document.getElementById(id).closest('.lf');if(w)w.style.display=v?'':'none';});
-  var aw=document.getElementById('l-area').closest('.lf');if(aw)aw.style.display=v?'':'none';
+// ── Cargar capa filtrable (parcelas) ──────────────────────────────────
+// Los datos se guardan en memoria; solo se renderizan al seleccionar un barrio
+async function cargarCapaFiltrable(url, layerGroup, clave) {
+    try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`HTTP ${r.status} en ${url}`);
+        const data = await r.json();
+        _datosFiltrables[clave]  = data;
+        _layersFiltrables[clave] = layerGroup;
+        console.log(`portal-chascomus: Capa filtrable "${clave}" cargada (${data.features.length} features)`);
+    } catch (err) {
+        console.error('portal-chascomus: Error cargando capa filtrable:', url, err);
+    }
 }
 
-function onInspSelect(val){
-  if(!val)return;
-  if(val==='manual'){
-    setManualVisible(true);
-    ['l-nombre','l-legajo','l-area','l-cargo'].forEach(function(id){document.getElementById(id).value='';});
-    var sw=document.getElementById('l-sup-wrap');if(sw)sw.style.display='none';return;
-  }
-  var ins=INSPECTORES[parseInt(val)];if(!ins)return;
-  document.getElementById('l-nombre').value=ins.nombre||'';
-  document.getElementById('l-legajo').value=ins.legajo||'';
-  document.getElementById('l-area').value=ins.area||'';
-  document.getElementById('l-cargo').value=ins.cargo||'';
-  setManualVisible(false);
-  var sw=document.getElementById('l-sup-wrap');if(sw)sw.style.display='none';
+// ── Cargar barrios con lógica de filtro ───────────────────────────────
+async function cargarBarriosConFiltro(url, layerGroup) {
+    await sincronizarPortal();
+    try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`HTTP ${r.status} en ${url}`);
+        const data = await r.json();
+
+        // Guardar todos los anillos de barrios (para detectar features rurales)
+        _todosLosAnillosBarrios = data.features.flatMap(f => _anillosBarrio(f));
+        console.log(`portal-chascomus: ${_todosLosAnillosBarrios.length} anillos de barrios cargados.`);
+
+        L.geoJSON(data, {
+            style: feat => ({
+                fillColor:   feat.properties.fill   || '#3498db',
+                fillOpacity: feat.properties['fill-opacity'] ?? 0.3,
+                color:       feat.properties.stroke || '#ffffff',
+                weight:      1.5
+            }),
+            onEachFeature: (feature, layer) => {
+                const nombre = feature.properties.name || 'Barrio';
+
+                // Popup informativo
+                layer.bindPopup(`
+                    <div style="font-family:sans-serif;min-width:180px;border-radius:8px;overflow:hidden;">
+                        <div style="background:#18224c;color:#b8d30f;padding:10px;text-align:center;">
+                            <b style="font-size:14px;">🏘️ ${escHTML(nombre)}</b>
+                        </div>
+                        <div style="padding:10px;background:#fff;text-align:center;font-size:12px;color:#555;">
+                            Tocá para ver las parcelas de este barrio
+                        </div>
+                    </div>
+                `);
+
+                // Click → filtrar parcelas
+                layer.on('click', () => {
+                    if (_barrioActivo === nombre) {
+                        _limpiarFiltro();
+                        layer.closePopup();
+                        return;
+                    }
+                    _barrioActivo = nombre;
+                    const anillos = _anillosBarrio(feature);
+                    const total   = _renderizarFiltradas(anillos);
+
+                    // Resaltar barrio seleccionado
+                    layerGroup.eachLayer(l => {
+                        if (l.setStyle) l.setStyle({ weight: 1.5, fillOpacity: 0.15 });
+                    });
+                    layer.setStyle({ weight: 3, fillOpacity: 0.5, color: '#b8d30f' });
+
+                    _mostrarToast(`🏘️ ${nombre} — ${total} parcela${total !== 1 ? 's' : ''}`);
+                    layer.closePopup();
+                });
+
+                // Hover
+                layer.on('mouseover', () => {
+                    if (_barrioActivo !== nombre)
+                        layer.setStyle({ fillOpacity: 0.5, weight: 2.5 });
+                });
+                layer.on('mouseout', () => {
+                    if (_barrioActivo !== nombre)
+                        layer.setStyle({
+                            fillColor:   feature.properties.fill   || '#3498db',
+                            fillOpacity: feature.properties['fill-opacity'] ?? 0.3,
+                            color:       feature.properties.stroke || '#ffffff',
+                            weight:      1.5
+                        });
+                });
+            }
+        }).addTo(layerGroup);
+
+    } catch (err) {
+        console.error('portal-chascomus: Error cargando barrios:', url, err);
+    }
 }
 
-function onAreaChange(){
-  var v=document.getElementById('l-area').value;
-  var sw=document.getElementById('l-sup-wrap');
-  if(sw)sw.style.display=(v==='all')?'':'none';
-  if(v==='all'){var u=document.getElementById('l-sup-user'),p=document.getElementById('l-sup-pass');if(u)u.value='';if(p)p.value='';}
+
+
+
+// =====================================================================
+// CARGA DE CAPAS
+// =====================================================================
+
+// Mapa de emojis por nombre de archivo GeoJSON (sin extensión, minúsculas)
+const EMOJI_POR_CAPA = {
+    // Territorio
+    'barrios':         '🏘️',
+    'sedesbarriales':  '🏠',
+    // Producción
+    'sosrural':        '🚜',
+    'apiarios':        '🐝',
+    'acacianegra':     '🌿',
+    // Plazas y alojamientos
+    'alojamientos': '🏨',
+    'restaurantes':  '🎛️',
+    'esp_recreativos': '🌳',
+    //Habilitaciones comerciales
+    'vigentes': '✅',
+    'vencidas': '❌',
+    // Comercios por rubro
+    'alimentacion':    '🛒',
+    'gastronomia':     '🍽️',
+    'indumentaria':    '👗',
+    'salud':           '🏥',
+    'automotor':       '🔧',
+    'construccion':    '🏗️',
+    'belleza':         '💇',
+    'turismo':         '🏨',
+    'hogar':           '🏡',
+    'tecnologia':      '💻',
+    'educacion':       '📚',
+    'agro':            '🌱',
+    'otros':           '🏬',
+    // Gestión
+    'edimunicipales':  '🕋',
+    'parcelas-urbanizadas':  '🗺️',
+    'parcelas-rurales':      '🗺️',
+    'subparcelas':           '🗺️',
+    // Servicios
+    'antenas':         '📡',
+    'puntoswifi':      '🛜',
+    // Seguridad
+    'seguridad':       '🚨',
+    'calles_chascomus':  '🚏',
+    // Educación
+    'escuelas_chascomus': '🏫'
+};
+
+function resolverEmoji(url) {
+    const nombre = url.split('/').pop().replace('.geojson', '').toLowerCase();
+    return EMOJI_POR_CAPA[nombre] || null;
 }
 
-// ── INIT ──
-buildLoginExtras();
-checkLogin();
-document.getElementById('login-sig').addEventListener('touchstart',function(){document.getElementById('sig-hint').style.display='none';},{passive:true});
-document.getElementById('login-sig').addEventListener('mousedown',function(){document.getElementById('sig-hint').style.display='none';});
+// Genera un id único
+function generarId() {
+    return Math.random().toString(36).slice(2, 11);
+}
 
-// ── SERVICE WORKER ──
-if('serviceWorker' in navigator){
-  window.addEventListener('load',function(){
-    navigator.serviceWorker.register('./sw.js').catch(function(){});
-  });
+// Escapa caracteres HTML para evitar XSS en popups
+function escHTML(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+async function cargarCapaGeoJSON(url, destino, estiloPropio = null) {
+    const emoji = resolverEmoji(url);
+
+    try {
+        // Carga el GeoJSON sin bloquear (no espera Sheets primero)
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`HTTP ${r.status} en ${url}`);
+        const data = await r.json();
+
+        // Espera los datos de Sheets en paralelo (ya puede estar lista)
+        await sincronizarPortal();
+
+        L.geoJSON(data, {
+            // Soporte para puntos con icono emoji
+            pointToLayer: (feature, latlng) => {
+                if (emoji) {
+                    return L.marker(latlng, {
+                        icon: L.divIcon({
+                            className: 'icono-emoji-transparente',
+                            html: `<div class="emoji-marker">${emoji}</div>`,
+                            iconSize: [30, 30],
+                            iconAnchor: [15, 15]
+                        })
+                    });
+                }
+                return L.marker(latlng);
+            },
+            // Estilo para polígonos y líneas
+            style: (feature) => {
+                const props = (feature && feature.properties) || {};
+                const nom = (props.name || props.nombre || "").toUpperCase();
+                const dExcel = baseDeDatosMuni[nom] || {};
+                return estiloPropio || {
+                    fillColor:   dExcel.COLOR_OVERRIDE || props.fill || '#3498db',
+                    fillOpacity: props['fill-opacity'] || 0.5,
+                    color:       props.stroke || '#ffffff',
+                    weight:      1.5
+                };
+            },
+            onEachFeature: (feature, layer) => {
+                const props = (feature && feature.properties) || {};
+                const nom = props.name || props.nombre || "Sin Nombre";
+                const id = generarId();
+                const finalProps = Object.assign({}, props, baseDeDatosMuni[String(nom).toUpperCase()] || {});
+
+                let html = `
+                    <div style="min-width:260px; font-family:sans-serif; border-radius:8px; overflow:hidden;">
+                        <div style="background:#2c3e50; color:#fff; padding:12px; text-align:center;">
+                            <h4 style="margin:0; font-size:14px; text-transform:uppercase;">${escHTML(nom)}</h4>
+                        </div>
+                        <div id="body-${id}" style="padding:15px; background:#fff; max-height:220px; overflow-y:auto;">
+                `;
+
+                let hayDatosVisibles = false;
+
+                for (let p in finalProps) {
+                    const pLow = p.toLowerCase();
+                    if (!LISTA_NEGRA.includes(pLow) && finalProps[p] !== null && finalProps[p] !== "") {
+                        hayDatosVisibles = true;
+                        html += `
+                            <div style="margin-bottom:10px; border-bottom:1px solid #f8f9fa; padding-bottom:5px;">
+                                <label style="font-size:9px; color:#a4b0be; text-transform:uppercase; font-weight:bold;">${escHTML(p)}</label>
+                                <div class="dato-valor-${id}" data-campo="${escHTML(p)}" style="font-size:13px; color:#212529; font-weight:600;">${escHTML(finalProps[p])}</div>
+                            </div>`;
+                    }
+                }
+
+                if (!hayDatosVisibles) {
+                    html += `<div style="text-align:center; color:#adb5bd; font-size:12px; font-style:italic; padding:10px;">Cargar datos de gestión.</div>`;
+                }
+
+                html += `
+                        </div>
+                    </div>
+                `;
+                layer.bindPopup(html);
+            }
+        }).addTo(destino);
+    } catch (err) {
+        console.error("portal-chascomus: Error cargando capa:", url, err);
+    }
 }
