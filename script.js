@@ -1,6 +1,6 @@
 // ── CONFIG ──
 const AREAS={hab:{label:'Habilitaciones',tipos:['ac','ai']},obr:{label:'Obras Privadas',tipos:['oi','ins']},seg:{label:'Seguridad Urbana',tipos:['sc','si','st']},amb:{label:'Ambiente',tipos:['aca','aia']},bro:{label:'Bromatologia',tipos:['br']}};
-const TIPOS={ac:{label:'Constatacion',badge:'AC',form:'form-ac',titulo:'Acta de Constatacion',pref:'AC-',dir:'Direccion de Habilitaciones',isig:'s-ac-2'},ai:{label:'Infraccion',badge:'AI',form:'form-ai',titulo:'Acta de Infraccion',pref:'AI-',dir:'Direccion de Habilitaciones',isig:'s-ai-2'},oi:{label:'Infraccion',badge:'OI',form:'form-oi',titulo:'Acta de Infraccion',pref:'OI-',dir:'Direccion de Obras Privadas',isig:'s-oi-2'},ins:{label:'Inspeccion',badge:'INS',form:'form-ins',titulo:'Acta de Inspeccion',pref:'INS-',dir:'Dir. Obras Privadas y Planeamiento',isig:'s-ins-2'},sc:{label:'Constatacion',badge:'SC',form:'form-sc',titulo:'Acta de Constatacion',pref:'SC-',dir:'Direccion de Seguridad Urbana',isig:'s-sc-2'},si:{label:'Infraccion',badge:'SI',form:'form-si',titulo:'Acta de Infraccion',pref:'SI-',dir:'Direccion de Seguridad Urbana',isig:'s-si-2'},st:{label:'Transito',badge:'ST',form:'form-st',titulo:'Acta Unica Infraccion de Transito',pref:'ST-',dir:'Direccion de Seguridad Urbana',isig:'s-st-1'},aca:{label:'Constatacion',badge:'ACA',form:'form-aca',titulo:'Acta de Constatacion',pref:'ACA-',dir:'Dir. Ambiente y Desarrollo Sustentable',isig:'s-aca-2'},aia:{label:'Infraccion',badge:'AIA',form:'form-aia',titulo:'Acta de Infraccion',pref:'AIA-',dir:'Dir. Ambiente y Desarrollo Sustentable',isig:'s-aia-2'},br:{label:'Inspeccion',badge:'BR',form:'form-br',titulo:'Acta de Inspeccion',pref:'BR-',dir:'Dir. Bromatologia y Zoonosis',isig:'s-br-2'}};
+const TIPOS={ac:{label:'Informacion',badge:'AC',form:'form-ac',titulo:'Acta de Informacion',pref:'AC-',dir:'Direccion de Habilitaciones',isig:'s-ac-2',color:'info'},ai:{label:'Infraccion',badge:'AI',form:'form-ai',titulo:'Acta de Infraccion',pref:'AI-',dir:'Direccion de Habilitaciones',isig:'s-ai-2',color:'infr'},oi:{label:'Infraccion',badge:'OI',form:'form-oi',titulo:'Acta de Infraccion',pref:'OI-',dir:'Direccion de Obras Privadas',isig:'s-oi-2',color:'infr'},ins:{label:'Inspeccion',badge:'INS',form:'form-ins',titulo:'Acta de Inspeccion',pref:'INS-',dir:'Dir. Obras Privadas y Planeamiento',isig:'s-ins-2',color:'insp'},sc:{label:'Informacion',badge:'SC',form:'form-sc',titulo:'Acta de Informacion',pref:'SC-',dir:'Direccion de Seguridad Urbana',isig:'s-sc-2',color:'info'},si:{label:'Infraccion',badge:'SI',form:'form-si',titulo:'Acta de Infraccion',pref:'SI-',dir:'Direccion de Seguridad Urbana',isig:'s-si-2',color:'infr'},st:{label:'Transito',badge:'ST',form:'form-st',titulo:'Acta Unica Infraccion de Transito',pref:'ST-',dir:'Direccion de Seguridad Urbana',isig:'s-st-1',color:'trans'},aca:{label:'Informacion',badge:'ACA',form:'form-aca',titulo:'Acta de Informacion',pref:'ACA-',dir:'Dir. Ambiente y Desarrollo Sustentable',isig:'s-aca-2',color:'info'},aia:{label:'Infraccion',badge:'AIA',form:'form-aia',titulo:'Acta de Infraccion',pref:'AIA-',dir:'Dir. Ambiente y Desarrollo Sustentable',isig:'s-aia-2',color:'infr'},br:{label:'Inspeccion',badge:'BR',form:'form-br',titulo:'Acta de Inspeccion',pref:'BR-',dir:'Dir. Bromatologia y Zoonosis',isig:'s-br-2',color:'insp'}};
 const BARRIOS=['139 Viviendas','30 de Mayo','Acceso Norte','Anahi','Caballito Blanco','Centro','Concordia','Costanera','El Algarrobo','El Hueco','El Porteno','Escribano','Gallo Blanco','Ipora','La Esmeralda','La Noria','Lomas Altas','Los Sauces','Parque Girado','Puerto Chascomus','San Cayetano','San Jose','San Juan Bautista','San Luis','San Miguel','Villa Lujan','Otro'];
 const bH='<option value="">Seleccionar</option>'+BARRIOS.map(b=>'<option>'+b+'</option>').join('');
 ['bar-ac','bar-ai','bar-sc','bar-si'].forEach(function(id){var e=document.getElementById(id);if(e)e.innerHTML=bH;});
@@ -114,6 +114,8 @@ function applyLogin(insp){
   });
   var ab=document.getElementById('tb-admin-btn');
   if(ab)ab.style.display=insp.area==='all'?'block':'none';
+  var at=document.querySelector('.area-tabs');
+  if(at)at.classList.toggle('sup-mode',insp.area==='all');
   setArea(insp.area==='all'?'hab':insp.area);
 }
 
@@ -183,6 +185,8 @@ function setTipo(t){
   document.getElementById('titulo-acta').textContent=TIPOS[t].titulo;
   document.getElementById('num-pref').textContent=TIPOS[t].pref;
   document.getElementById('hdr-dir').textContent=TIPOS[t].dir;
+  var hb=document.querySelector('.hdr-bar');
+  if(hb){hb.className='hdr-bar'+(TIPOS[t].color?' tipo-'+TIPOS[t].color:'');}
   loadNum();
   document.querySelectorAll('#'+TIPOS[t].form+' .map-canvas').forEach(function(cv){initMapCanvas(cv.id,cv.dataset.style);});
   setTimeout(prefillInspector,100);
@@ -406,14 +410,30 @@ function toast(msg,dur){dur=dur||2500;var t=document.getElementById('toast');t.t
 // ── WHATSAPP ──
 function openWA(){document.getElementById('wa-num').value='';document.getElementById('wa-overlay').classList.add('open');setTimeout(function(){document.getElementById('wa-num').focus();},200);}
 function closeWA(){document.getElementById('wa-overlay').classList.remove('open');}
-function sendWA(){
+async function sendWA(){
   var raw=document.getElementById('wa-num').value.replace(/\D/g,'');
   if(raw.length<8){alert('Ingresa un numero valido');return;}
   var num=raw.startsWith('54')?raw:'54'+raw;
   closeWA();
-  var msg=buildMsg();
-  window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
-  toast('Abriendo WhatsApp...');
+  toast('Generando PDF...',9000);
+  try{
+    var r=await buildPDF();
+    var blob=r.pdf.output('blob');
+    var file=new File([blob],r.filename,{type:'application/pdf'});
+    if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
+      await navigator.share({files:[file],title:r.filename});
+      toast('PDF listo para compartir');
+    } else {
+      // Fallback: descargar PDF + abrir WhatsApp con resumen de texto
+      r.pdf.save(r.filename);
+      var msg=buildMsg();
+      window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
+      toast('PDF descargado. Adjuntalo en WhatsApp.');
+    }
+  }catch(err){
+    if(err&&err.name==='AbortError'){toast('Compartir cancelado');}
+    else{console.error(err);toast('Error al generar PDF');}
+  }
 }
 
 function buildMsg(){
@@ -442,45 +462,44 @@ function buildMsg(){
 }
 
 // ── PDF ──
-async function descargar(){
-  var btn=document.getElementById('btn-dl');btn.disabled=true;btn.textContent='Generando...';
-  toast('Preparando PDF...',9000);
+async function buildPDF(){
   var el=document.getElementById('acta-doc');
+  var n=parseInt(document.getElementById('num-acta').value)||1;
+  document.body.classList.add('pdf-mode');
+  el.style.cssText='width:750px!important;min-width:750px!important;max-width:750px!important';
+  window.scrollTo(0,0);
+  await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
+  await new Promise(function(r){setTimeout(r,400);});
   try{
-    var n=parseInt(document.getElementById('num-acta').value)||1;
-    document.body.classList.add('pdf-mode');
-    el.style.cssText='width:750px!important;min-width:750px!important;max-width:750px!important';
-    window.scrollTo(0,0);
-    await new Promise(function(r){requestAnimationFrame(function(){requestAnimationFrame(r);});});
-    await new Promise(function(r){setTimeout(r,400);});
-
     var canvas=await captureActa();
-
     el.style.cssText='';document.body.classList.remove('pdf-mode');
-    // JPEG 88% — mucho mas liviano que PNG
     var img=canvas.toDataURL('image/jpeg',0.88);
     var jsPDF=window.jspdf.jsPDF;
     var pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
     var pw=210,ph=297;
     var imgH=(canvas.height*pw)/canvas.width;
-    if(imgH<=ph){
-      // Entra en una sola hoja A4 — alinear arriba
-      pdf.addImage(img,'JPEG',0,0,pw,imgH,'','FAST');
-    } else {
-      // Escalar proporcionalmente para que entre en el alto de A4
-      var fitW=(canvas.width*ph)/canvas.height;
-      pdf.addImage(img,'JPEG',(pw-fitW)/2,0,fitW,ph,'','FAST');
-    }
+    if(imgH<=ph){pdf.addImage(img,'JPEG',0,0,pw,imgH,'','FAST');}
+    else{var fitW=(canvas.width*ph)/canvas.height;pdf.addImage(img,'JPEG',(pw-fitW)/2,0,fitW,ph,'','FAST');}
     var numStr=String(n).padStart(6,'0');
-    pdf.save('Acta-'+TIPOS[tipo].pref+numStr+'.pdf');
-    var nextN=n+1;setSeq(TIPOS[tipo].pref,nextN);
-    document.getElementById('num-acta').value=String(nextN).padStart(6,'0');
-    toast('PDF descargado correctamente');
+    var filename='Acta-'+TIPOS[tipo].pref+numStr+'.pdf';
+    return{pdf:pdf,n:n,numStr:numStr,filename:filename};
   }catch(err){
     el.style.cssText='';document.body.classList.remove('pdf-mode');
-    console.error(err);toast('Error al generar PDF');
+    throw err;
   }
-  btn.disabled=false;btn.textContent='Descargar PDF';
+}
+
+async function descargar(){
+  var btn=document.getElementById('btn-dl');btn.disabled=true;btn.textContent='Generando...';
+  toast('Preparando PDF...',9000);
+  try{
+    var r=await buildPDF();
+    r.pdf.save(r.filename);
+    var nextN=r.n+1;setSeq(TIPOS[tipo].pref,nextN);
+    document.getElementById('num-acta').value=String(nextN).padStart(6,'0');
+    toast('PDF guardado correctamente');
+  }catch(err){console.error(err);toast('Error al generar PDF');}
+  btn.disabled=false;btn.textContent='Guardar y Descargar PDF';
 }
 
 // ── BACKOFFICE ──────────────────────────────────────────────────
