@@ -173,3 +173,17 @@ body.pdf-mode .sig-acl input{width:100%!important;display:block!important;box-si
 body.pdf-mode .sig-btns,body.pdf-mode .sig-hint,body.pdf-mode .mapa-tools{display:none!important}
 
 @media print{.topbar,.sel-wrap,.nueva-wrap,.btn-bar,.wa-overlay,.login-overlay{display:none!important}.acta-wrap{padding:0;max-width:none}.acta{box-shadow:none;border-radius:0}}
+
+/* ── FIX AUTOFILL ──────────────────────────────────────────────
+   Los navegadores aplican fondo amarillo a campos autocompletados.
+   Esta regla lo neutraliza usando box-shadow blanco inset.
+─────────────────────────────────────────────────────────────── */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  -webkit-text-fill-color: #1a1a2e !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
