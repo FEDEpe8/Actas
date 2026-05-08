@@ -418,21 +418,15 @@ async function sendWA(){
   toast('Generando PDF...',9000);
   try{
     var r=await buildPDF();
-    var blob=r.pdf.output('blob');
-    var file=new File([blob],r.filename,{type:'application/pdf'});
-    if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
-      await navigator.share({files:[file],title:r.filename});
-      toast('PDF listo para compartir');
-    } else {
-      // Fallback: descargar PDF + abrir WhatsApp con resumen de texto
-      r.pdf.save(r.filename);
-      var msg=buildMsg();
-      window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
-      toast('PDF descargado. Adjuntalo en WhatsApp.');
-    }
+    // 1. Descargar el PDF en el dispositivo
+    r.pdf.save(r.filename);
+    // 2. Pequeña pausa para que el navegador procese la descarga
+    await new Promise(function(res){setTimeout(res,700);});
+    // 3. Abrir WhatsApp al número específico (sin texto, chat limpio)
+    window.open('https://wa.me/'+num,'_blank');
+    toast('PDF guardado. Adjuntalo en el chat que se abrio.',5000);
   }catch(err){
-    if(err&&err.name==='AbortError'){toast('Compartir cancelado');}
-    else{console.error(err);toast('Error al generar PDF');}
+    console.error(err);toast('Error al generar PDF');
   }
 }
 
