@@ -1,3 +1,36 @@
+// ── FIREBASE CONFIG ──────────────────────────────────────────────────────────
+// PASOS PARA CONFIGURAR:
+// 1) Entra a https://console.firebase.google.com y crea un proyecto nuevo
+// 2) En el proyecto, ve a "Compilacion > Realtime Database" y crea la base de datos
+//    (elegir la region "Estados Unidos" o la mas cercana)
+// 3) En las Reglas de la base de datos, pega esto y publica:
+//    { "rules": { "contadores": { ".read": true, ".write": true } } }
+// 4) Ve a "Configuracion del proyecto" (icono engranaje) > "Tus apps" > agrega app Web
+// 5) Copia los valores del objeto firebaseConfig y reemplaza los de abajo
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyA4hbpcNkfVUDgd6fmCxxLbKEcgv-AvG5Y",
+  authDomain: "contador-6fecb.firebaseapp.com",
+  databaseURL: "https://contador-6fecb-default-rtdb.firebaseio.com",
+  projectId: "contador-6fecb",
+  storageBucket: "contador-6fecb.firebasestorage.app",
+  messagingSenderId: "395558186119",
+  appId: "1:395558186119:web:388467d8d35b5b504a5c22"
+};
+// Si los contadores en Firebase deben arrancar desde un numero distinto de 1
+// (por ejemplo, porque ya existen actas previas), el supervisor puede ir a
+// Realtime Database en Firebase y editar manualmente el valor inicial de cada
+// contador bajo la ruta "contadores/AC", "contadores/AI", etc.
+// ─────────────────────────────────────────────────────────────────────────────
+var _fbDb = null;
+(function(){
+  try {
+    if(FIREBASE_CONFIG.databaseURL && !FIREBASE_CONFIG.databaseURL.startsWith('PEGAR')){
+      firebase.initializeApp(FIREBASE_CONFIG);
+      _fbDb = firebase.database();
+    }
+  } catch(e){ console.warn('Firebase init error:', e); }
+})();
+
 // ── CONFIG ──
 const AREAS={hab:{label:'Habilitaciones',tipos:['ac','ai']},obr:{label:'Obras Privadas',tipos:['oi','ins']},seg:{label:'Seguridad Urbana',tipos:['sc','si','st']},amb:{label:'Ambiente',tipos:['aca','aia']},bro:{label:'Bromatologia',tipos:['br']}};
 const TIPOS={ac:{label:'Informacion',badge:'AC',form:'form-ac',titulo:'Acta de Informacion',pref:'AC-',dir:'Direccion de Habilitaciones',isig:'s-ac-2',color:'info'},ai:{label:'Infraccion',badge:'AI',form:'form-ai',titulo:'Acta de Infraccion',pref:'AI-',dir:'Direccion de Habilitaciones',isig:'s-ai-2',color:'infr'},oi:{label:'Infraccion',badge:'OI',form:'form-oi',titulo:'Acta de Infraccion',pref:'OI-',dir:'Direccion de Obras Privadas',isig:'s-oi-2',color:'infr'},ins:{label:'Inspeccion',badge:'INS',form:'form-ins',titulo:'Acta de Inspeccion',pref:'INS-',dir:'Dir. Obras Privadas y Planeamiento',isig:'s-ins-2',color:'insp'},sc:{label:'Informacion',badge:'SC',form:'form-sc',titulo:'Acta de Informacion',pref:'SC-',dir:'Direccion de Seguridad Urbana',isig:'s-sc-2',color:'info'},si:{label:'Infraccion',badge:'SI',form:'form-si',titulo:'Acta de Infraccion',pref:'SI-',dir:'Direccion de Seguridad Urbana',isig:'s-si-2',color:'infr'},st:{label:'Transito',badge:'ST',form:'form-st',titulo:'Acta Unica Infraccion de Transito',pref:'ST-',dir:'Direccion de Seguridad Urbana',isig:'s-st-1',color:'trans'},aca:{label:'Informacion',badge:'ACA',form:'form-aca',titulo:'Acta de Informacion',pref:'ACA-',dir:'Dir. Ambiente y Desarrollo Sustentable',isig:'s-aca-2',color:'info'},aia:{label:'Infraccion',badge:'AIA',form:'form-aia',titulo:'Acta de Infraccion',pref:'AIA-',dir:'Dir. Ambiente y Desarrollo Sustentable',isig:'s-aia-2',color:'infr'},br:{label:'Inspeccion',badge:'BR',form:'form-br',titulo:'Acta de Inspeccion',pref:'BR-',dir:'Dir. Bromatologia y Zoonosis',isig:'s-br-2',color:'insp'}};
@@ -7,21 +40,136 @@ const bH='<option value="">Seleccionar</option>'+BARRIOS.map(b=>'<option>'+b+'</
 
 var tipo='ac',area='hab';
 
-// ── LISTA DE INSPECTORES ──────────────────────────────────────────────────────
-// Agregar/editar los inspectores del municipio en este arreglo.
+// ── API DE SEGURIDAD ──────────────────────────────────────────────────────────
+// Paso 1: POST /seguridad/gettoken  con Authorization: Basic base64(user:pass)
+// Paso 2: POST /seguridad/validartoken  con Authorization: Bearer <token>
+const API_BASE='http://api.chascomus.gob.ar';
+
+async function apiGetToken(){
+  var url=API_BASE+'/seguridad/gettoken';
+  var authHeader='Basic '+btoa('nicolas.galli'+':'+'nicolas.galli');
+  console.group('[API] apiGetToken');
+  console.log('→ URL:',url);
+  console.log('→ Method: POST');
+  console.log('→ Headers:',{Authorization:authHeader});
+  try{
+    var res=await fetch(url,{method:'POST',headers:{'Authorization':authHeader}});
+    console.log('← Status:',res.status,res.statusText);
+    console.log('← Content-Type:',res.headers.get('content-type'));
+    if(!res.ok){
+      console.error('✗ auth_failed (status no OK)');
+      console.groupEnd();
+      throw new Error('auth_failed');
+    }
+    var ct=res.headers.get('content-type')||'';
+    var raw=ct.includes('json')?await res.json():await res.text();
+    console.log('← Body:',raw);
+    // Validar envelope {code, status, message, data}
+    if(raw&&typeof raw==='object'&&raw.status==='error'){
+      console.error('✗ gettoken rechazado por la API:',raw.message||'sin mensaje');
+      console.groupEnd();
+      throw new Error('auth_failed:'+(raw.message||'desconocido'));
+    }
+    var token=null;
+    var fuente=null;
+    if(typeof raw==='string'){
+      token=raw.trim();fuente='raw (string plano)';
+    } else if(raw&&typeof raw==='object'){
+      // Preferir el campo `data` del envelope; si es objeto, sacar `.token`
+      if(typeof raw.data==='string'){token=raw.data.trim();fuente='raw.data (string)';}
+      else if(raw.data&&typeof raw.data==='object'&&raw.data.token){token=String(raw.data.token);fuente='raw.data.token';}
+      else if(raw.token){token=String(raw.token);fuente='raw.token';}
+    }
+    console.log('  fuente del token:',fuente);
+    if(!token){
+      console.error('✗ token_not_found en la respuesta. Body recibido:',raw);
+      console.groupEnd();
+      throw new Error('token_not_found');
+    }
+    // Sanity check: si el "token" parece ser solo un codigo HTTP (3 digitos),
+    // casi seguro estamos parseando mal el envelope.
+    if(/^\d{1,4}$/.test(token)){
+      console.error('✗ El token parseado parece un codigo HTTP, no un token real:',token,'| body completo:',raw);
+      console.groupEnd();
+      throw new Error('token_not_found:parece_codigo_http');
+    }
+    console.log('✓ Token obtenido:',token,'(longitud:',token.length+')');
+    console.groupEnd();
+    return token;
+  }catch(e){
+    console.error('✗ Error en apiGetToken:',e);
+    console.groupEnd();
+    throw e;
+  }
+}
+
+async function apiHacerLogin(token,user,pass){
+  var url=API_BASE+'/faltas/login';
+  var json={
+    "token": token,
+    "action": "login",
+    "user": user,
+    "pass": pass
+  };
+  var headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+  console.group('[API] apiHacerLogin');
+  console.log('→ URL:',url);
+  console.log('→ Method: POST');
+  console.log('→ Headers:',headers);
+  console.log('→ Body (objeto):',json);
+  console.log('→ Body (JSON string):',JSON.stringify(json));
+  try{
+    var res=await fetch(url,{
+      method:'POST',
+      headers:headers,
+      body:JSON.stringify(json)
+    });
+    console.log('← Status:',res.status,res.statusText);
+    console.log('← Content-Type:',res.headers.get('content-type'));
+    if(!res.ok){
+      var errText='';
+      try{errText=await res.text();}catch(e){}
+      console.error('✗ token_invalid (status no OK). Respuesta:',errText);
+      console.groupEnd();
+      throw new Error('token_invalid');
+    }
+    var ct=res.headers.get('content-type')||'';
+    var resp=ct.includes('json')?await res.json():{};
+    console.log('← Body:',resp);
+    // La API devuelve un envelope: {code, status, message, data}
+    // Validar que el login fue realmente exitoso
+    if(resp&&resp.status==='error'){
+      console.error('✗ Login rechazado por la API:',resp.message||'sin mensaje');
+      console.groupEnd();
+      throw new Error('login_failed:'+(resp.message||'desconocido'));
+    }
+    if(resp&&resp.data===false){
+      console.error('✗ Login rechazado: data===false');
+      console.groupEnd();
+      throw new Error('login_failed:data_false');
+    }
+    var data=(resp&&typeof resp.data==='object'&&resp.data!==null)?resp.data:resp;
+    console.log('✓ Login OK, data:',data);
+    console.groupEnd();
+    return data;
+  }catch(e){
+    console.error('✗ Error en apiHacerLogin:',e);
+    console.groupEnd();
+    throw e;
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── PERFILES LOCALES ──────────────────────────────────────────────────────────
+// Usados para asignar area/cargo a cada inspector (la auth ya no usa estos datos).
 // Areas: 'hab'=Habilitaciones, 'obr'=Obras Privadas, 'seg'=Seguridad Urbana,
 //        'amb'=Ambiente, 'bro'=Bromatologia, 'all'=Supervisor (todas las areas)
-// IMPORTANTE: Cambiar las claves antes de publicar.
 const INSPECTORES=[
-  {nombre:'Maria Paula Campestre',legajo:'1001',area:'amb',cargo:'Inspector Municipal',clave:'mp1001'},
-  {nombre:'Marcelo Javier Zaccheo',legajo:'1002',area:'obr',cargo:'Tec. Superior Obras',clave:'mz1002'},
-  {nombre:'Mariana Arias',legajo:'1003',area:'bro',cargo:'Inspectora Municipal',clave:'ma1003'},
-  {nombre:'Federico Perez',legajo:'1004',area:'admin',cargo:'Inspector Municipal',clave:'Ch@scomus2026'},
+  {nombre:'Maria Paula Campestre',legajo:'1001',area:'amb',cargo:'Inspector Municipal'},
+  {nombre:'Marcelo Javier Zaccheo',legajo:'1002',area:'obr',cargo:'Tec. Superior Obras'},
+  {nombre:'Mariana Arias',legajo:'1003',area:'bro',cargo:'Inspectora Municipal'},
+  {nombre:'Federico Perez',legajo:'1004',area:'admin',cargo:'Inspector Municipal'},
 ];
-// Credenciales del supervisor (acceso a todas las areas)
-// IMPORTANTE: Cambiar estas credenciales antes de publicar
-const SUP_USER='admin';
-const SUP_PASS='Ch@scomus2026';
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── LOGIN ──
@@ -39,23 +187,14 @@ function getUsers(){
 }
 function saveUsers(u){localStorage.setItem('users_db',JSON.stringify(u));}
 
-function findInspector(nombre,clave){
-  if(normNombre(nombre)===normNombre(SUP_USER)&&clave===SUP_PASS)
-    return{nombre:'Supervisor',legajo:'0000',area:'all',cargo:'Supervisor',clave:SUP_PASS};
-  return getUsers().find(function(ins){return normNombre(ins.nombre)===normNombre(nombre)&&ins.clave===clave;})||null;
-}
-
-// Pre-carga la firma cuando el usuario escribe su nombre
+// Pre-carga la firma usando el mapeo usuario→legajo guardado tras el ultimo login
 function onNombreInput(){
-  var nombre=document.getElementById('l-nombre').value.trim();
-  var found=getUsers().find(function(ins){return normNombre(ins.nombre)===normNombre(nombre);});
-  if(found){
-    var saved=localStorage.getItem('firma_'+found.legajo);
-    if(saved){
-      loadSigCanvas(saved);
-      setSigStatus('Firma guardada','#2d8b4a');
-      return;
-    }
+  var user=document.getElementById('l-nombre').value.trim().toLowerCase();
+  if(!user){setSigStatus('(se carga automaticamente)','#aaa');return;}
+  var legajo=localStorage.getItem('umap_'+user);
+  if(legajo){
+    var saved=localStorage.getItem('firma_'+legajo);
+    if(saved){loadSigCanvas(saved);setSigStatus('Firma guardada','#2d8b4a');return;}
   }
   setSigStatus('(se carga automaticamente)','#aaa');
 }
@@ -81,26 +220,80 @@ function checkLogin(){
   document.getElementById('login-overlay').style.display='flex';
 }
 
-function doLogin(){
-  var nombre=document.getElementById('l-nombre').value.trim();
-  var clave=document.getElementById('l-clave').value;
+// Mapea el codigo de area que devuelve la API (ej: "SEG", "HAB", "OBR") a las
+// claves internas usadas por la app (ej: "seg", "hab", "obr", "all").
+function mapApiArea(apiArea){
+  if(!apiArea)return null;
+  var k=String(apiArea).trim().toLowerCase();
+  // Sinonimos / supervisor
+  if(k==='all'||k==='admin'||k==='sup'||k==='supervisor'||k==='todas')return 'all';
+  // Codigos directos que ya coinciden con las claves de AREAS
+  if(AREAS[k])return k;
+  // Mapeos extra por si el backend usa otra abreviatura
+  var aliases={habilitaciones:'hab',obras:'obr',seguridad:'seg',ambiente:'amb',bromatologia:'bro',transito:'seg'};
+  if(aliases[k])return aliases[k];
+  return null;
+}
+
+async function doLogin(){
+  var user=document.getElementById('l-nombre').value.trim();
+  var pass=document.getElementById('l-clave').value;
   var err=document.getElementById('login-err');
-  if(!nombre||!clave){err.style.display='block';err.textContent='Completar nombre y clave';return;}
-  var found=findInspector(nombre,clave);
-  if(!found){err.style.display='block';err.textContent='Nombre o clave incorrectos';return;}
+  var btn=document.querySelector('.btn-login');
+  if(!user||!pass){err.style.display='block';err.textContent='Completar usuario y clave';return;}
   err.style.display='none';
-  var sigCv=document.getElementById('login-sig');
-  var firma;
-  if(!isCanvasBlank(sigCv)){
-    firma=sigCv.toDataURL('image/png');
-    localStorage.setItem('firma_'+found.legajo,firma);
-  } else {
-    firma=localStorage.getItem('firma_'+found.legajo)||null;
+  btn.disabled=true;btn.textContent='Verificando...';
+  try{
+    var token=await apiGetToken();
+    var data=await apiHacerLogin(token,user,pass);
+    // Guardar mapeo usuario → legajo para pre-carga de firma en proximos logins
+    var legajoApi=data.legajo||data.id||data.dni||data.idUsuario||user;
+    localStorage.setItem('umap_'+user.toLowerCase(),String(legajoApi));
+    // Buscar perfil local por nombre completo (si la API lo devuelve) para area/cargo
+    var nombreApi=data.nombre||data.name||data.apellido_nombre||null;
+    var local=getUsers().find(function(u){
+      return (nombreApi&&normNombre(u.nombre)===normNombre(nombreApi))||normNombre(u.legajo||'')===normNombre(String(legajoApi));
+    });
+    // El area viene de la API en mayusculas (ej: "SEG"). La normalizamos.
+    var areaApi=mapApiArea(data.area);
+    console.log('[Login] area cruda de la API:',data.area,'→ mapeada a:',areaApi);
+    var found={
+      nombre:nombreApi||(local&&local.nombre)||user,
+      legajo:String(legajoApi),
+      area:areaApi||(local&&local.area)||'hab',
+      cargo:data.cargo||data.puesto||(local&&local.cargo)||'Inspector Municipal',
+      username:user
+    };
+    if(data.supervisor||data.es_supervisor||data.rol==='supervisor')found.area='all';
+    var sigCv=document.getElementById('login-sig');
+    var firma;
+    if(!isCanvasBlank(sigCv)){
+      firma=sigCv.toDataURL('image/png');
+      localStorage.setItem('firma_'+found.legajo,firma);
+    } else {
+      firma=localStorage.getItem('firma_'+found.legajo)||null;
+    }
+    var insp={nombre:found.nombre,legajo:found.legajo,area:found.area,cargo:found.cargo,firma:firma,loggedIn:true,username:found.username};
+    saveInsp(insp);
+    document.getElementById('login-overlay').style.display='none';
+    applyLogin(insp);
+  }catch(e){
+    console.error(e);
+    err.style.display='block';
+    var msg=String(e&&e.message||e);
+    if(msg.indexOf('login_failed')===0){
+      var detalle=msg.split(':').slice(1).join(':');
+      err.textContent='Usuario o clave incorrectos'+(detalle?' ('+detalle+')':'');
+    } else if(msg==='auth_failed'||msg==='token_not_found'){
+      err.textContent='No se pudo conectar con el servicio de autenticacion';
+    } else if(msg==='token_invalid'){
+      err.textContent='Token invalido o credenciales rechazadas';
+    } else {
+      err.textContent='Error al iniciar sesion';
+    }
+  }finally{
+    btn.disabled=false;btn.textContent='Ingresar al sistema';
   }
-  var insp={nombre:found.nombre,legajo:found.legajo,area:found.area,cargo:found.cargo,firma:firma,loggedIn:true};
-  saveInsp(insp);
-  document.getElementById('login-overlay').style.display='none';
-  applyLogin(insp);
 }
 
 function applyLogin(insp){
@@ -121,7 +314,7 @@ function applyLogin(insp){
 
 function editPerfil(){
   var insp=getInsp()||{};
-  document.getElementById('l-nombre').value=insp.nombre||'';
+  document.getElementById('l-nombre').value=insp.username||'';
   document.getElementById('l-clave').value='';
   var saved=insp.legajo?localStorage.getItem('firma_'+insp.legajo):null;
   var firma=saved||insp.firma||null;
@@ -166,6 +359,70 @@ function prefillInspector(){
   }
 }
 
+// ── PRE-COMPLETADO DEL PARRAFO INICIAL ────────────────────────────────────────
+// Inspecciona los <p class="narr"> del formulario activo y completa los inputs
+// vacios de fecha, mes, anio, hora e inspector segun el texto que los precede.
+// Tambien rellena los campos "Dia / Mes / Ano / Hora-min" del acta de transito.
+function prefillNarrativa(formId){
+  var f=document.getElementById(formId);
+  if(!f)return;
+  var d=new Date();
+  var dia=d.getDate();
+  var meses=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  var mes=meses[d.getMonth()];
+  var anioFull=d.getFullYear();
+  var anio2=String(anioFull).slice(-2);
+  var hora=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  var insp=getInsp();
+
+  function textoAntes(inp){
+    var t='',n=inp.previousSibling;
+    while(n){
+      if(n.nodeType===3)t=n.textContent+t;
+      else if(n.nodeType===1)t=(n.textContent||'')+t;
+      n=n.previousSibling;
+    }
+    return t.toLowerCase();
+  }
+
+  // 1) Inputs dentro de cada parrafo narrativo
+  f.querySelectorAll('p.narr').forEach(function(p){
+    p.querySelectorAll('input').forEach(function(inp){
+      if(inp.value)return; // no pisar lo que el usuario ya escribio
+      var antes=textoAntes(inp);
+      // Dia: el texto previo termina en "a los" o "los"
+      if(/(?:a\s+)?los\s*$/.test(antes)){inp.value=dia;return;}
+      // Mes: "del mes" o "del mes de"
+      if(/mes(?:\s+de)?\s*$/.test(antes)){inp.value=mes;return;}
+      // Anio (2 digitos): precedido por "dos mil", "de 20", "ano 20"
+      if(/(?:dos\s+mil|de\s+20|ano\s+20)\s*$/.test(antes)){inp.value=anio2;return;}
+      // Anio (4 digitos): "del ano" sin 20 despues
+      if(/del\s+ano\s*$/.test(antes)){inp.value=anioFull;return;}
+      // Hora: "siendo las"
+      if(/siendo\s+las\s*$/.test(antes)){inp.value=hora;return;}
+      // Inspector: en form-oi ("que suscribe") o form-ins ("el Inspector")
+      if(insp&&insp.nombre){
+        if(/que\s+suscribe\s*$/.test(antes)||/el\s+inspector\s*$/.test(antes)){
+          inp.value=insp.nombre;return;
+        }
+      }
+    });
+  });
+
+  // 2) Caso especial: acta de transito (form-st) usa labels separados Dia / Mes / Ano / Hora-min
+  f.querySelectorAll('.f').forEach(function(field){
+    var label=field.querySelector('label');
+    if(!label)return;
+    var inp=field.querySelector('input');
+    if(!inp||inp.value)return;
+    var l=label.textContent.toLowerCase().trim();
+    if(l==='dia')inp.value=dia;
+    else if(l==='mes')inp.value=mes;
+    else if(l==='ano'||l==='año')inp.value=anioFull;
+    else if(l==='hora/min'||l==='hora')inp.value=hora;
+  });
+}
+
 // ── AREA / TIPO ──
 function setArea(a){
   area=a;
@@ -189,14 +446,59 @@ function setTipo(t){
   if(hb){hb.className='hdr-bar'+(TIPOS[t].color?' tipo-'+TIPOS[t].color:'');}
   loadNum();
   document.querySelectorAll('#'+TIPOS[t].form+' .map-canvas').forEach(function(cv){initMapCanvas(cv.id,cv.dataset.style);});
-  setTimeout(prefillInspector,100);
+  setTimeout(function(){prefillInspector();prefillNarrativa(TIPOS[t].form);},100);
 }
 
 // ── NUMERACION ──
-function getSeq(p){return parseInt(localStorage.getItem('seq_'+p.replace(/-/g,''))||'0');}
-function setSeq(p,n){localStorage.setItem('seq_'+p.replace(/-/g,''),n);}
-function loadNum(){var n=Math.max(1,getSeq(TIPOS[tipo].pref));document.getElementById('num-acta').value=String(n).padStart(6,'0');}
-function nuevaActa(){var n=getSeq(TIPOS[tipo].pref)+1;setSeq(TIPOS[tipo].pref,n);document.getElementById('num-acta').value=String(n).padStart(6,'0');limpiar(false);prefillInspector();toast('Nueva acta N '+String(n).padStart(6,'0'));}
+function getSeqLocal(p){return parseInt(localStorage.getItem('seq_'+p.replace(/-/g,''))||'0');}
+function setSeqLocal(p,n){localStorage.setItem('seq_'+p.replace(/-/g,''),n);}
+
+// Muestra el ultimo numero conocido (cache local) como referencia visual
+function loadNum(){var n=Math.max(1,getSeqLocal(TIPOS[tipo].pref));document.getElementById('num-acta').value=String(n).padStart(6,'0');}
+
+// Reserva el siguiente numero de forma atomica en Firebase (compartido entre todos los inspectores)
+function getNextRemoteSeq(prefix){
+  var key=prefix.replace(/-/g,'');
+  return new Promise(function(resolve,reject){
+    _fbDb.ref('contadores/'+key).transaction(function(current){
+      return (current||0)+1;
+    },function(error,committed,snapshot){
+      if(error)reject(error);
+      else if(!committed)reject(new Error('Transaccion no completada'));
+      else resolve(snapshot.val());
+    });
+  });
+}
+
+async function nuevaActa(){
+  if(!_fbDb){
+    // Firebase no configurado: usar contador local (comportamiento anterior)
+    var n=getSeqLocal(TIPOS[tipo].pref)+1;
+    setSeqLocal(TIPOS[tipo].pref,n);
+    document.getElementById('num-acta').value=String(n).padStart(6,'0');
+    limpiar(false);prefillInspector();prefillNarrativa(TIPOS[tipo].form);
+    toast('Nueva acta N '+String(n).padStart(6,'0')+' (modo local — configurar Firebase para numeracion compartida)');
+    return;
+  }
+  if(!navigator.onLine){
+    toast('Sin conexion a internet. Necesitas conexion para reservar un numero de acta.');
+    return;
+  }
+  var btns=document.querySelectorAll('.btn-nueva');
+  btns.forEach(function(b){b.disabled=true;b.textContent='Obteniendo numero...';});
+  toast('Reservando numero de acta...',9000);
+  try{
+    var n=await getNextRemoteSeq(TIPOS[tipo].pref);
+    setSeqLocal(TIPOS[tipo].pref,n);
+    document.getElementById('num-acta').value=String(n).padStart(6,'0');
+    limpiar(false);prefillInspector();prefillNarrativa(TIPOS[tipo].form);
+    toast('Nueva acta N '+String(n).padStart(6,'0'));
+  }catch(err){
+    console.error(err);
+    toast('Error al reservar numero. Verificar conexion a internet.');
+  }
+  btns.forEach(function(b){b.disabled=false;b.textContent='+ Nueva acta';});
+}
 
 // ── CAPTURA PDF (FIX PRINCIPAL) ─────────────────────────────────────────────
 // html2canvas clona el DOM pero pierde los valores asignados por JavaScript
@@ -400,6 +702,9 @@ function limpiar(doToast){
   f.querySelectorAll('.otro-inp').forEach(function(el){el.style.display='none';});
   f.querySelectorAll('.sig-canvas').forEach(function(cv){cv.getContext('2d').clearRect(0,0,cv.width,cv.height);});
   f.querySelectorAll('.map-canvas').forEach(function(cv){if(cv._clearMap)cv._clearMap();});
+  // Re-aplicar pre-completado de inspector y parrafo inicial
+  prefillInspector();
+  prefillNarrativa(TIPOS[tipo].form);
   if(doToast)toast('Formulario limpiado');
 }
 
@@ -489,8 +794,7 @@ async function descargar(){
   try{
     var r=await buildPDF();
     r.pdf.save(r.filename);
-    var nextN=r.n+1;setSeq(TIPOS[tipo].pref,nextN);
-    document.getElementById('num-acta').value=String(nextN).padStart(6,'0');
+    // El numero fue reservado al presionar "Nueva Acta" — no se incrementa aqui
     toast('PDF guardado correctamente');
   }catch(err){console.error(err);toast('Error al generar PDF');}
   btn.disabled=false;btn.textContent='Guardar y Descargar PDF';
@@ -642,6 +946,118 @@ function autoResizeTa(ta){ta.style.height='auto';ta.style.height=ta.scrollHeight
 document.querySelectorAll('.f textarea').forEach(function(ta){
   ta.addEventListener('input',function(){autoResizeTa(this);});
 });
+
+// ── DICTADO POR VOZ (Web Speech API) ─────────────────────────────────────────
+// Agrega un boton de microfono a las textareas de "Observaciones" / "diferencias"
+// para permitir el dictado de texto, util sobre todo en uso desde el celular.
+// Soporte: Chrome/Edge (Android, desktop) y Safari (iOS 14.5+).
+(function(){
+  function textoEtiquetaCercana(ta){
+    // 1) label dentro del contenedor .f
+    var cont=ta.closest('.f');
+    if(cont){
+      var lbl=cont.querySelector('label');
+      if(lbl&&lbl.textContent)return lbl.textContent;
+    }
+    // 2) un .hdr-sec previo al contenedor (caso del acta de transito)
+    var prev=cont?cont.previousElementSibling:ta.previousElementSibling;
+    while(prev){
+      if(prev.classList&&prev.classList.contains('hdr-sec'))return prev.textContent||'';
+      prev=prev.previousElementSibling;
+    }
+    return '';
+  }
+  function esDictable(ta){
+    var t=textoEtiquetaCercana(ta);
+    return /observ|diferenc/i.test(t);
+  }
+  function crearReconocedor(){
+    var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR)return null;
+    var r=new SR();
+    r.lang='es-AR';
+    r.continuous=true;
+    r.interimResults=true;
+    return r;
+  }
+  function attachDictado(ta){
+    var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    // Envolver la textarea con un wrapper relativo para posicionar el boton
+    var wrap=document.createElement('div');
+    wrap.className='dict-wrap';
+    ta.parentNode.insertBefore(wrap,ta);
+    wrap.appendChild(ta);
+    var btn=document.createElement('button');
+    btn.type='button';
+    btn.className='dict-btn';
+    btn.setAttribute('aria-label','Dictar por voz');
+    btn.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>';
+    if(!SR){
+      btn.disabled=true;
+      btn.classList.add('dict-off');
+      btn.title='Tu navegador no soporta dictado por voz';
+    } else {
+      btn.title='Dictar por voz';
+    }
+    wrap.appendChild(btn);
+    if(!SR)return;
+
+    var rec=null,grabando=false,baseText='';
+    function detenerUI(){
+      grabando=false;
+      btn.classList.remove('dict-on');
+      btn.title='Dictar por voz';
+    }
+    btn.addEventListener('click',function(e){
+      e.preventDefault();
+      if(grabando){try{rec&&rec.stop();}catch(_){}return;}
+      rec=crearReconocedor();
+      if(!rec)return;
+      baseText=ta.value||'';
+      if(baseText&&!/\s$/.test(baseText))baseText+=' ';
+      rec.onresult=function(ev){
+        var interim='',finales='';
+        for(var i=ev.resultIndex;i<ev.results.length;i++){
+          var r=ev.results[i];
+          if(r.isFinal)finales+=r[0].transcript;
+          else interim+=r[0].transcript;
+        }
+        if(finales){baseText+=finales+(/\s$/.test(finales)?'':' ');}
+        ta.value=baseText+interim;
+        // Disparar evento input para que el auto-resize y demas listeners reaccionen
+        ta.dispatchEvent(new Event('input',{bubbles:true}));
+      };
+      rec.onerror=function(ev){
+        console.warn('[Dictado] error:',ev.error);
+        if(ev.error==='not-allowed'||ev.error==='service-not-allowed'){
+          alert('El navegador no permite acceder al microfono. Revisa los permisos del sitio.');
+        }
+        detenerUI();
+      };
+      rec.onend=function(){detenerUI();};
+      try{
+        rec.start();
+        grabando=true;
+        btn.classList.add('dict-on');
+        btn.title='Detener dictado';
+      }catch(err){
+        console.error('[Dictado] no se pudo iniciar:',err);
+        detenerUI();
+      }
+    });
+  }
+  function init(){
+    document.querySelectorAll('textarea').forEach(function(ta){
+      if(ta.dataset.dictReady==='1')return;
+      if(!esDictable(ta))return;
+      ta.dataset.dictReady='1';
+      attachDictado(ta);
+    });
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);
+  else init();
+})();
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ── INIT ──
 checkLogin();

@@ -175,7 +175,17 @@ body.pdf-mode .sign-box{width:100%!important;min-width:0;align-items:stretch!imp
 body.pdf-mode .sig-acl{width:100%!important;box-sizing:border-box}
 body.pdf-mode .sig-acl input{width:100%!important;display:block!important;box-sizing:border-box}
 /* Ocultar controles que no van en el PDF */
-body.pdf-mode .sig-btns,body.pdf-mode .sig-hint,body.pdf-mode .mapa-tools{display:none!important}
+body.pdf-mode .sig-btns,body.pdf-mode .sig-hint,body.pdf-mode .mapa-tools,body.pdf-mode .dict-btn{display:none!important}
+body.pdf-mode .dict-wrap textarea{padding-right:8px}
+
+/* ── DICTADO POR VOZ ── */
+.dict-wrap{position:relative;width:100%}
+.dict-wrap textarea{padding-right:40px!important;box-sizing:border-box;width:100%}
+.dict-btn{position:absolute;right:6px;top:6px;width:30px;height:30px;border-radius:50%;border:1px solid #d0d0d0;background:#fafafa;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;color:#555;z-index:3;-webkit-tap-highlight-color:transparent}
+.dict-btn:active{background:#ececec}
+.dict-btn.dict-on{background:#e74c3c;color:#fff;border-color:#c0392b;animation:dict-pulse 1.2s infinite}
+.dict-btn.dict-off{opacity:.4;cursor:not-allowed}
+@keyframes dict-pulse{0%{box-shadow:0 0 0 0 rgba(231,76,60,.55)}70%{box-shadow:0 0 0 10px rgba(231,76,60,0)}100%{box-shadow:0 0 0 0 rgba(231,76,60,0)}}
 
 @media print{.topbar,.sel-wrap,.nueva-wrap,.btn-bar,.wa-overlay,.login-overlay{display:none!important}.acta-wrap{padding:0;max-width:none}.acta{box-shadow:none;border-radius:0}}
 
