@@ -46,8 +46,8 @@ var tipo='ac',area='hab';
 //        'amb'=Ambiente, 'bro'=Bromatologia, 'all'=Supervisor (todas las areas)
 const INSPECTORES=[
   {username:'mariap', nombre:'Maria Paula Campestre',legajo:'1001',area:'amb',cargo:'Inspector Municipal'},
-  {username:'marcelo',nombre:'Marcelo Javier Zaccheo',legajo:'1002',area:'obr',cargo:'Tec. Superior Obras'},
-  {username:'mariana',nombre:'Mariana Arias',          legajo:'1003',area:'bro',cargo:'Inspectora Municipal'},
+  {username:'mzaccheo',nombre:'Marcelo Javier Zaccheo',legajo:'1002',area:'obr',cargo:'Tec. Superior Obras'},
+  {username:'marias',nombre:'Mariana Arias',          legajo:'1003',area:'bro',cargo:'Inspectora Municipal'},
   {username:'fperez', nombre:'Federico Perez',         legajo:'1004',area:'all',cargo:'Inspector Municipal'},
 ];
 // ─────────────────────────────────────────────────────────────────────────────
@@ -818,8 +818,8 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
     return '';
   }
   function esDictable(ta){
-    var t=textoEtiquetaCercana(ta);
-    return /observ|diferenc/i.test(t);
+    // El boton de microfono aparece en TODAS las textareas dentro del acta
+    return !!ta.closest('.acta');
   }
   function crearReconocedor(){
     var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -863,7 +863,7 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
       if(grabando){try{rec&&rec.stop();}catch(_){}return;}
       rec=crearReconocedor();
       if(!rec)return;
-      baseText=ta.value||'';
+      baseText=(ta.value||'').toUpperCase();
       if(baseText&&!/\s$/.test(baseText))baseText+=' ';
       rec.onresult=function(ev){
         var interim='',finales='';
@@ -872,8 +872,11 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
           if(r.isFinal)finales+=r[0].transcript;
           else interim+=r[0].transcript;
         }
+        // Forzar mayusculas en lo dictado (acta oficial)
+        finales=finales.toUpperCase();
+        interim=interim.toUpperCase();
         if(finales){baseText+=finales+(/\s$/.test(finales)?'':' ');}
-        ta.value=baseText+interim;
+        ta.value=(baseText+interim).toUpperCase();
         // Disparar evento input para que el auto-resize y demas listeners reaccionen
         ta.dispatchEvent(new Event('input',{bubbles:true}));
       };
@@ -906,6 +909,39 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);
   else init();
+})();
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── MAYUSCULAS AUTOMATICAS EN ACTAS ──────────────────────────────────────────
+// Todo lo que el inspector escriba o dicte dentro de un acta se guarda en
+// MAYUSCULAS (como corresponde a un acta oficial). Se excluyen mail, tel y
+// los campos con clase "no-upper" si los hubiera.
+(function(){
+  function debeMayuscular(el){
+    if(!el||!el.closest)return false;
+    if(!el.closest('.acta'))return false;
+    if(el.classList&&el.classList.contains('no-upper'))return false;
+    var tag=(el.tagName||'').toLowerCase();
+    if(tag!=='input'&&tag!=='textarea')return false;
+    var type=(el.getAttribute('type')||'text').toLowerCase();
+    // No transformar campos donde mayuscular romperia el dato
+    if(type==='email'||type==='tel'||type==='password'||type==='url'||type==='number'||type==='date'||type==='time')return false;
+    return true;
+  }
+  function aMayus(el){
+    var v=el.value;
+    if(typeof v!=='string')return;
+    var u=v.toUpperCase();
+    if(u===v)return;
+    // Preservar posicion del cursor
+    var s=el.selectionStart,e=el.selectionEnd;
+    el.value=u;
+    try{el.setSelectionRange(s,e);}catch(_){}
+  }
+  document.addEventListener('input',function(ev){
+    var t=ev.target;
+    if(debeMayuscular(t))aMayus(t);
+  },true);
 })();
 // ─────────────────────────────────────────────────────────────────────────────
 
