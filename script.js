@@ -40,135 +40,15 @@ const bH='<option value="">Seleccionar</option>'+BARRIOS.map(b=>'<option>'+b+'</
 
 var tipo='ac',area='hab';
 
-// ── API DE SEGURIDAD ──────────────────────────────────────────────────────────
-// Paso 1: POST /seguridad/gettoken  con Authorization: Basic base64(user:pass)
-// Paso 2: POST /seguridad/validartoken  con Authorization: Bearer <token>
-const API_BASE='http://api.chascomus.gob.ar';
-
-async function apiGetToken(){
-  var url=API_BASE+'/seguridad/gettoken';
-  var authHeader='Basic '+btoa('nicolas.galli'+':'+'nicolas.galli');
-  console.group('[API] apiGetToken');
-  console.log('→ URL:',url);
-  console.log('→ Method: POST');
-  console.log('→ Headers:',{Authorization:authHeader});
-  try{
-    var res=await fetch(url,{method:'POST',headers:{'Authorization':authHeader}});
-    console.log('← Status:',res.status,res.statusText);
-    console.log('← Content-Type:',res.headers.get('content-type'));
-    if(!res.ok){
-      console.error('✗ auth_failed (status no OK)');
-      console.groupEnd();
-      throw new Error('auth_failed');
-    }
-    var ct=res.headers.get('content-type')||'';
-    var raw=ct.includes('json')?await res.json():await res.text();
-    console.log('← Body:',raw);
-    // Validar envelope {code, status, message, data}
-    if(raw&&typeof raw==='object'&&raw.status==='error'){
-      console.error('✗ gettoken rechazado por la API:',raw.message||'sin mensaje');
-      console.groupEnd();
-      throw new Error('auth_failed:'+(raw.message||'desconocido'));
-    }
-    var token=null;
-    var fuente=null;
-    if(typeof raw==='string'){
-      token=raw.trim();fuente='raw (string plano)';
-    } else if(raw&&typeof raw==='object'){
-      // Preferir el campo `data` del envelope; si es objeto, sacar `.token`
-      if(typeof raw.data==='string'){token=raw.data.trim();fuente='raw.data (string)';}
-      else if(raw.data&&typeof raw.data==='object'&&raw.data.token){token=String(raw.data.token);fuente='raw.data.token';}
-      else if(raw.token){token=String(raw.token);fuente='raw.token';}
-    }
-    console.log('  fuente del token:',fuente);
-    if(!token){
-      console.error('✗ token_not_found en la respuesta. Body recibido:',raw);
-      console.groupEnd();
-      throw new Error('token_not_found');
-    }
-    // Sanity check: si el "token" parece ser solo un codigo HTTP (3 digitos),
-    // casi seguro estamos parseando mal el envelope.
-    if(/^\d{1,4}$/.test(token)){
-      console.error('✗ El token parseado parece un codigo HTTP, no un token real:',token,'| body completo:',raw);
-      console.groupEnd();
-      throw new Error('token_not_found:parece_codigo_http');
-    }
-    console.log('✓ Token obtenido:',token,'(longitud:',token.length+')');
-    console.groupEnd();
-    return token;
-  }catch(e){
-    console.error('✗ Error en apiGetToken:',e);
-    console.groupEnd();
-    throw e;
-  }
-}
-
-async function apiHacerLogin(token,user,pass){
-  var url=API_BASE+'/faltas/login';
-  var json={
-    "token": token,
-    "action": "login",
-    "user": user,
-    "pass": pass
-  };
-  var headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
-  console.group('[API] apiHacerLogin');
-  console.log('→ URL:',url);
-  console.log('→ Method: POST');
-  console.log('→ Headers:',headers);
-  console.log('→ Body (objeto):',json);
-  console.log('→ Body (JSON string):',JSON.stringify(json));
-  try{
-    var res=await fetch(url,{
-      method:'POST',
-      headers:headers,
-      body:JSON.stringify(json)
-    });
-    console.log('← Status:',res.status,res.statusText);
-    console.log('← Content-Type:',res.headers.get('content-type'));
-    if(!res.ok){
-      var errText='';
-      try{errText=await res.text();}catch(e){}
-      console.error('✗ token_invalid (status no OK). Respuesta:',errText);
-      console.groupEnd();
-      throw new Error('token_invalid');
-    }
-    var ct=res.headers.get('content-type')||'';
-    var resp=ct.includes('json')?await res.json():{};
-    console.log('← Body:',resp);
-    // La API devuelve un envelope: {code, status, message, data}
-    // Validar que el login fue realmente exitoso
-    if(resp&&resp.status==='error'){
-      console.error('✗ Login rechazado por la API:',resp.message||'sin mensaje');
-      console.groupEnd();
-      throw new Error('login_failed:'+(resp.message||'desconocido'));
-    }
-    if(resp&&resp.data===false){
-      console.error('✗ Login rechazado: data===false');
-      console.groupEnd();
-      throw new Error('login_failed:data_false');
-    }
-    var data=(resp&&typeof resp.data==='object'&&resp.data!==null)?resp.data:resp;
-    console.log('✓ Login OK, data:',data);
-    console.groupEnd();
-    return data;
-  }catch(e){
-    console.error('✗ Error en apiHacerLogin:',e);
-    console.groupEnd();
-    throw e;
-  }
-}
-// ─────────────────────────────────────────────────────────────────────────────
-
 // ── PERFILES LOCALES ──────────────────────────────────────────────────────────
-// Usados para asignar area/cargo a cada inspector (la auth ya no usa estos datos).
+// Login local (sin API): el usuario ingresa con `username` y como contrasena su `legajo`.
 // Areas: 'hab'=Habilitaciones, 'obr'=Obras Privadas, 'seg'=Seguridad Urbana,
 //        'amb'=Ambiente, 'bro'=Bromatologia, 'all'=Supervisor (todas las areas)
 const INSPECTORES=[
-  {nombre:'Maria Paula Campestre',legajo:'1001',area:'amb',cargo:'Inspector Municipal'},
-  {nombre:'Marcelo Javier Zaccheo',legajo:'1002',area:'obr',cargo:'Tec. Superior Obras'},
-  {nombre:'Mariana Arias',legajo:'1003',area:'bro',cargo:'Inspectora Municipal'},
-  {nombre:'Federico Perez',legajo:'1004',area:'admin',cargo:'Inspector Municipal'},
+  {username:'mariap', nombre:'Maria Paula Campestre',legajo:'1001',area:'amb',cargo:'Inspector Municipal'},
+  {username:'marcelo',nombre:'Marcelo Javier Zaccheo',legajo:'1002',area:'obr',cargo:'Tec. Superior Obras'},
+  {username:'mariana',nombre:'Mariana Arias',          legajo:'1003',area:'bro',cargo:'Inspectora Municipal'},
+  {username:'fperez', nombre:'Federico Perez',         legajo:'1004',area:'all',cargo:'Inspector Municipal'},
 ];
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -220,80 +100,50 @@ function checkLogin(){
   document.getElementById('login-overlay').style.display='flex';
 }
 
-// Mapea el codigo de area que devuelve la API (ej: "SEG", "HAB", "OBR") a las
-// claves internas usadas por la app (ej: "seg", "hab", "obr", "all").
-function mapApiArea(apiArea){
-  if(!apiArea)return null;
-  var k=String(apiArea).trim().toLowerCase();
-  // Sinonimos / supervisor
-  if(k==='all'||k==='admin'||k==='sup'||k==='supervisor'||k==='todas')return 'all';
-  // Codigos directos que ya coinciden con las claves de AREAS
-  if(AREAS[k])return k;
-  // Mapeos extra por si el backend usa otra abreviatura
-  var aliases={habilitaciones:'hab',obras:'obr',seguridad:'seg',ambiente:'amb',bromatologia:'bro',transito:'seg'};
-  if(aliases[k])return aliases[k];
-  return null;
-}
-
-async function doLogin(){
+function doLogin(){
   var user=document.getElementById('l-nombre').value.trim();
-  var pass=document.getElementById('l-clave').value;
+  var pass=document.getElementById('l-clave').value.trim();
   var err=document.getElementById('login-err');
-  var btn=document.querySelector('.btn-login');
   if(!user||!pass){err.style.display='block';err.textContent='Completar usuario y clave';return;}
   err.style.display='none';
-  btn.disabled=true;btn.textContent='Verificando...';
-  try{
-    var token=await apiGetToken();
-    var data=await apiHacerLogin(token,user,pass);
-    // Guardar mapeo usuario → legajo para pre-carga de firma en proximos logins
-    var legajoApi=data.legajo||data.id||data.dni||data.idUsuario||user;
-    localStorage.setItem('umap_'+user.toLowerCase(),String(legajoApi));
-    // Buscar perfil local por nombre completo (si la API lo devuelve) para area/cargo
-    var nombreApi=data.nombre||data.name||data.apellido_nombre||null;
-    var local=getUsers().find(function(u){
-      return (nombreApi&&normNombre(u.nombre)===normNombre(nombreApi))||normNombre(u.legajo||'')===normNombre(String(legajoApi));
-    });
-    // El area viene de la API en mayusculas (ej: "SEG"). La normalizamos.
-    var areaApi=mapApiArea(data.area);
-    console.log('[Login] area cruda de la API:',data.area,'→ mapeada a:',areaApi);
-    var found={
-      nombre:nombreApi||(local&&local.nombre)||user,
-      legajo:String(legajoApi),
-      area:areaApi||(local&&local.area)||'hab',
-      cargo:data.cargo||data.puesto||(local&&local.cargo)||'Inspector Municipal',
-      username:user
-    };
-    if(data.supervisor||data.es_supervisor||data.rol==='supervisor')found.area='all';
-    var sigCv=document.getElementById('login-sig');
-    var firma;
-    if(!isCanvasBlank(sigCv)){
-      firma=sigCv.toDataURL('image/png');
-      localStorage.setItem('firma_'+found.legajo,firma);
-    } else {
-      firma=localStorage.getItem('firma_'+found.legajo)||null;
-    }
-    var insp={nombre:found.nombre,legajo:found.legajo,area:found.area,cargo:found.cargo,firma:firma,loggedIn:true,username:found.username};
-    saveInsp(insp);
-    document.getElementById('login-overlay').style.display='none';
-    applyLogin(insp);
-  }catch(e){
-    console.error(e);
+
+  // Buscar inspector en la lista local: matchea por username (case-insensitive),
+  // por legajo, o por nombre completo. La contrasena debe coincidir con el legajo.
+  var u=user.toLowerCase();
+  var local=getUsers().find(function(x){
+    return (x.username&&x.username.toLowerCase()===u)
+      ||normNombre(x.legajo||'')===normNombre(user)
+      ||normNombre(x.nombre||'')===normNombre(user);
+  });
+  if(!local||String(pass)!==String(local.legajo)){
     err.style.display='block';
-    var msg=String(e&&e.message||e);
-    if(msg.indexOf('login_failed')===0){
-      var detalle=msg.split(':').slice(1).join(':');
-      err.textContent='Usuario o clave incorrectos'+(detalle?' ('+detalle+')':'');
-    } else if(msg==='auth_failed'||msg==='token_not_found'){
-      err.textContent='No se pudo conectar con el servicio de autenticacion';
-    } else if(msg==='token_invalid'){
-      err.textContent='Token invalido o credenciales rechazadas';
-    } else {
-      err.textContent='Error al iniciar sesion';
-    }
-  }finally{
-    btn.disabled=false;btn.textContent='Ingresar al sistema';
+    err.textContent='Usuario o clave incorrectos';
+    return;
   }
+
+  // Guardar mapeo usuario → legajo para pre-carga de firma en proximos logins
+  localStorage.setItem('umap_'+u,String(local.legajo));
+
+  var sigCv=document.getElementById('login-sig');
+  var firma;
+  if(!isCanvasBlank(sigCv)){
+    firma=sigCv.toDataURL('image/png');
+    localStorage.setItem('firma_'+local.legajo,firma);
+  } else {
+    firma=localStorage.getItem('firma_'+local.legajo)||null;
+  }
+  var insp={
+    nombre:local.nombre,
+    legajo:String(local.legajo),
+    area:local.area||'hab',
+    cargo:local.cargo||'Inspector Municipal',
+    firma:firma,
+    loggedIn:true,
+    username:local.username||user
+  };
+  saveInsp(insp);
+  document.getElementById('login-overlay').style.display='none';
+  applyLogin(insp);
 }
 
 function applyLogin(insp){
