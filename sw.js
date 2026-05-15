@@ -1,4 +1,4 @@
-const CACHE = 'actas-v4';
+const CACHE = 'actas-v5';
 const ASSETS = [
   './index.html',
   './style.css',
