@@ -288,6 +288,79 @@ function nuevaActa(){
   toast('Nueva acta N '+String(n).padStart(6,'0'));
 }
 
+// ── FOTOS ADJUNTAS ──
+var _fotos = []; // {dataUrl, w, h}
+
+function onFotosSelect(ev){
+  var files = ev.target ? ev.target.files : null;
+  if(!files || !files.length) return;
+  var pending = files.length;
+  var done = function(){ pending--; if(pending<=0) renderFotos(); };
+  Array.prototype.forEach.call(files, function(f){
+    if(!f.type || f.type.indexOf('image/')!==0){ done(); return; }
+    _compressImage(f, function(item){
+      if(item) _fotos.push(item);
+      done();
+    });
+  });
+  try{ ev.target.value=''; }catch(_){}
+}
+
+function _compressImage(file, cb){
+  try{
+    var reader = new FileReader();
+    reader.onload = function(e){
+      var img = new Image();
+      img.onload = function(){
+        try{
+          var maxW = 1600, maxH = 1600;
+          var w = img.naturalWidth || img.width;
+          var h = img.naturalHeight || img.height;
+          if(w<=0 || h<=0){ cb(null); return; }
+          var ratio = Math.min(1, maxW/w, maxH/h);
+          var dw = Math.round(w*ratio), dh = Math.round(h*ratio);
+          var cv = document.createElement('canvas');
+          cv.width = dw; cv.height = dh;
+          var ctx = cv.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0,0,dw,dh);
+          ctx.drawImage(img, 0, 0, dw, dh);
+          var dataUrl = cv.toDataURL('image/jpeg', 0.85);
+          cb({dataUrl:dataUrl, w:dw, h:dh});
+        }catch(err){ console.warn('[Fotos] compress error:',err); cb(null); }
+      };
+      img.onerror = function(){ cb(null); };
+      img.src = e.target.result;
+    };
+    reader.onerror = function(){ cb(null); };
+    reader.readAsDataURL(file);
+  }catch(err){ console.warn('[Fotos] reader error:',err); cb(null); }
+}
+
+function removeFoto(idx){
+  if(idx<0 || idx>=_fotos.length) return;
+  _fotos.splice(idx,1);
+  renderFotos();
+}
+
+function renderFotos(){
+  var grid = document.getElementById('fotos-grid');
+  var cnt = document.getElementById('fotos-count');
+  if(cnt) cnt.textContent = String(_fotos.length);
+  if(!grid) return;
+  var html = '';
+  for(var i=0;i<_fotos.length;i++){
+    html += '<div class="fotos-thumb">'
+         +    '<img src="'+_fotos[i].dataUrl+'" alt="Foto '+(i+1)+'">'
+         +    '<span class="fotos-num">'+(i+1)+'</span>'
+         +    '<button class="fotos-del" type="button" onclick="removeFoto('+i+')" aria-label="Quitar foto">✕</button>'
+         +  '</div>';
+  }
+  grid.innerHTML = html;
+}
+
+function clearFotos(){ _fotos = []; renderFotos(); }
+
 // ── CAPTURA PDF ──
 function syncDOM(origEl, clonedEl){
   // Inputs de texto
@@ -520,6 +593,7 @@ function limpiar(doToast){
   f.querySelectorAll('.otro-inp').forEach(function(el){el.style.display='none';});
   f.querySelectorAll('.sig-canvas').forEach(function(cv){cv.getContext('2d').clearRect(0,0,cv.width,cv.height);});
   f.querySelectorAll('.map-canvas').forEach(function(cv){if(cv._clearMap)cv._clearMap();});
+  clearFotos();
   prefillInspector();
   prefillNarrativa(TIPOS[tipo].form);
   if(doToast)toast('Formulario limpiado');
@@ -595,6 +669,24 @@ async function buildPDF(){
     else{var fitW=(canvas.width*ph)/canvas.height;pdf.addImage(img,'JPEG',(pw-fitW)/2,0,fitW,ph,'','FAST');}
     var numStr=String(n).padStart(6,'0');
     var filename='Acta-'+TIPOS[tipo].pref+numStr+'.pdf';
+    // Anexar fotos como paginas adicionales
+    if(_fotos.length){
+      for(var fi=0; fi<_fotos.length; fi++){
+        var fo=_fotos[fi];
+        pdf.addPage('a4','portrait');
+        var marg=10, titH=12;
+        var avW=pw-2*marg, avH=ph-2*marg-titH;
+        var fw=fo.w||1, fh=fo.h||1;
+        var rr=Math.min(avW/fw, avH/fh);
+        var dw=fw*rr, dh=fh*rr;
+        var dx=(pw-dw)/2, dy=marg+titH+(avH-dh)/2;
+        pdf.setFontSize(10);
+        pdf.setTextColor(26,26,46);
+        pdf.text('Acta '+TIPOS[tipo].pref+numStr+' - Foto '+(fi+1)+' / '+_fotos.length, pw/2, marg+7, {align:'center'});
+        try{ pdf.addImage(fo.dataUrl,'JPEG',dx,dy,dw,dh,'','FAST'); }
+        catch(err){ console.warn('[Fotos] addImage error:',err); }
+      }
+    }
     return{pdf:pdf,n:n,numStr:numStr,filename:filename};
   }catch(err){
     el.style.cssText='';document.body.classList.remove('pdf-mode');
@@ -877,6 +969,7 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
 })();
 
 // ── INIT ──
+renderFotos();
 checkLogin();
 document.getElementById('login-sig').addEventListener('touchstart',function(){document.getElementById('sig-hint').style.display='none';},{passive:true});
 document.getElementById('login-sig').addEventListener('mousedown',function(){document.getElementById('sig-hint').style.display='none';});
