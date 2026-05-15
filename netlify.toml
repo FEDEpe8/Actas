@@ -1,0 +1,10 @@
+# Proxy: reescribe llamadas /api/* a la API municipal (que esta en HTTP plano).
+# Esto evita el error de "Mixed Content" cuando el sitio se sirve por HTTPS.
+# El navegador ve la llamada como same-origin HTTPS y Netlify la reenvia al
+# backend del lado servidor, donde el HTTP simple no es un problema.
+
+[[redirects]]
+  from = "/api/*"
+  to = "http://api.chascomus.gob.ar/:splat"
+  status = 200
+  force = true
