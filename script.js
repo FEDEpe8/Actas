@@ -1,47 +1,19 @@
-// ── FIREBASE CONFIG ──────────────────────────────────────────────────────────
-// PASOS PARA CONFIGURAR:
-// 1) Entra a https://console.firebase.google.com y crea un proyecto nuevo
-// 2) En el proyecto, ve a "Compilacion > Realtime Database" y crea la base de datos
-//    (elegir la region "Estados Unidos" o la mas cercana)
-// 3) En las Reglas de la base de datos, pega esto y publica:
-//    { "rules": { "contadores": { ".read": true, ".write": true } } }
-// 4) Ve a "Configuracion del proyecto" (icono engranaje) > "Tus apps" > agrega app Web
-// 5) Copia los valores del objeto firebaseConfig y reemplaza los de abajo
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyA4hbpcNkfVUDgd6fmCxxLbKEcgv-AvG5Y",
-  authDomain: "contador-6fecb.firebaseapp.com",
-  databaseURL: "https://contador-6fecb-default-rtdb.firebaseio.com",
-  projectId: "contador-6fecb",
-  storageBucket: "contador-6fecb.firebasestorage.app",
-  messagingSenderId: "395558186119",
-  appId: "1:395558186119:web:388467d8d35b5b504a5c22"
-};
-// Si los contadores en Firebase deben arrancar desde un numero distinto de 1
-// (por ejemplo, porque ya existen actas previas), el supervisor puede ir a
-// Realtime Database en Firebase y editar manualmente el valor inicial de cada
-// contador bajo la ruta "contadores/AC", "contadores/AI", etc.
-// ─────────────────────────────────────────────────────────────────────────────
-var _fbDb = null;
-(function(){
-  try {
-    if(FIREBASE_CONFIG.databaseURL && !FIREBASE_CONFIG.databaseURL.startsWith('PEGAR')){
-      firebase.initializeApp(FIREBASE_CONFIG);
-      _fbDb = firebase.database();
-    }
-  } catch(e){ console.warn('Firebase init error:', e); }
-})();
-
 // ── CONFIG ──
 const AREAS={hab:{label:'Habilitaciones',tipos:['ac','ai']},obr:{label:'Obras Privadas',tipos:['oi','ins']},seg:{label:'Seguridad Urbana',tipos:['sc','si','st']},amb:{label:'Ambiente',tipos:['aca','aia']},bro:{label:'Bromatologia',tipos:['br']}};
 const TIPOS={ac:{label:'Informacion',badge:'AC',form:'form-ac',titulo:'Acta de Informacion',pref:'AC-',dir:'Direccion de Habilitaciones',isig:'s-ac-2',color:'info'},ai:{label:'Infraccion',badge:'AI',form:'form-ai',titulo:'Acta de Infraccion',pref:'AI-',dir:'Direccion de Habilitaciones',isig:'s-ai-2',color:'infr'},oi:{label:'Infraccion',badge:'OI',form:'form-oi',titulo:'Acta de Infraccion',pref:'OI-',dir:'Direccion de Obras Privadas',isig:'s-oi-2',color:'infr'},ins:{label:'Inspeccion',badge:'INS',form:'form-ins',titulo:'Acta de Inspeccion',pref:'INS-',dir:'Dir. Obras Privadas y Planeamiento',isig:'s-ins-2',color:'insp'},sc:{label:'Informacion',badge:'SC',form:'form-sc',titulo:'Acta de Informacion',pref:'SC-',dir:'Direccion de Seguridad Urbana',isig:'s-sc-2',color:'info'},si:{label:'Infraccion',badge:'SI',form:'form-si',titulo:'Acta de Infraccion',pref:'SI-',dir:'Direccion de Seguridad Urbana',isig:'s-si-2',color:'infr'},st:{label:'Transito',badge:'ST',form:'form-st',titulo:'Acta Unica Infraccion de Transito',pref:'ST-',dir:'Direccion de Seguridad Urbana',isig:'s-st-1',color:'trans'},aca:{label:'Informacion',badge:'ACA',form:'form-aca',titulo:'Acta de Informacion',pref:'ACA-',dir:'Dir. Ambiente y Desarrollo Sustentable',isig:'s-aca-2',color:'info'},aia:{label:'Infraccion',badge:'AIA',form:'form-aia',titulo:'Acta de Infraccion',pref:'AIA-',dir:'Dir. Ambiente y Desarrollo Sustentable',isig:'s-aia-2',color:'infr'},br:{label:'Inspeccion',badge:'BR',form:'form-br',titulo:'Acta de Inspeccion',pref:'BR-',dir:'Dir. Bromatologia y Zoonosis',isig:'s-br-2',color:'insp'}};
 const BARRIOS=['139 Viviendas','30 de Mayo','Acceso Norte','Anahi','Caballito Blanco','Centro','Concordia','Costanera','El Algarrobo','El Hueco','El Porteno','Escribano','Gallo Blanco','Ipora','La Esmeralda','La Noria','Lomas Altas','Los Sauces','Parque Girado','Puerto Chascomus','San Cayetano','San Jose','San Juan Bautista','San Luis','San Miguel','Villa Lujan','Otro'];
 const bH='<option value="">Seleccionar</option>'+BARRIOS.map(b=>'<option>'+b+'</option>').join('');
-['bar-ac','bar-ai','bar-sc','bar-si'].forEach(function(id){var e=document.getElementById(id);if(e)e.innerHTML=bH;});
+// Cargar barrios en todos los selects de todas las areas
+['bar-ac','bar-ai','bar-sc','bar-si','bar-aca','bar-aia','bar-br'].forEach(function(id){
+  var e=document.getElementById(id);
+  if(e) e.innerHTML=bH;
+});
 
 var tipo='ac',area='hab';
+var _mapInited = {}; // Controlar inicializacion de mapas
 
-// ── PERFILES LOCALES ──────────────────────────────────────────────────────────
-// Login local (sin API): el usuario ingresa con `username` y como contrasena su `legajo`.
+// ── PERFILES LOCALES ──
+// Login local: el usuario ingresa con `username` y como contrasena su `legajo`.
 // Areas: 'hab'=Habilitaciones, 'obr'=Obras Privadas, 'seg'=Seguridad Urbana,
 //        'amb'=Ambiente, 'bro'=Bromatologia, 'all'=Supervisor (todas las areas)
 const INSPECTORES=[
@@ -56,7 +28,17 @@ const INSPECTORES=[
 function getInsp(){try{return JSON.parse(localStorage.getItem('insp'));}catch(e){return null;}}
 function saveInsp(d){localStorage.setItem('insp',JSON.stringify(d));}
 
-function isCanvasBlank(cv){return!cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data.some(function(x){return x!==0;});}
+function isCanvasBlank(cv){
+  var ctx=cv.getContext('2d');
+  var imgData=ctx.getImageData(0,0,cv.width,cv.height);
+  // Verificar si hay algo dibujado (con margen de tolerancia)
+  for(var i=0;i<imgData.data.length;i+=4){
+    if(imgData.data[i+0]!==255 || imgData.data[i+1]!==255 || imgData.data[i+2]!==255){
+      return false;
+    }
+  }
+  return true;
+}
 
 function normNombre(s){return s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');}
 
@@ -67,7 +49,6 @@ function getUsers(){
 }
 function saveUsers(u){localStorage.setItem('users_db',JSON.stringify(u));}
 
-// Pre-carga la firma usando el mapeo usuario→legajo guardado tras el ultimo login
 function onNombreInput(){
   var user=document.getElementById('l-nombre').value.trim().toLowerCase();
   if(!user){setSigStatus('(se carga automaticamente)','#aaa');return;}
@@ -107,8 +88,6 @@ function doLogin(){
   if(!user||!pass){err.style.display='block';err.textContent='Completar usuario y clave';return;}
   err.style.display='none';
 
-  // Buscar inspector en la lista local: matchea por username (case-insensitive),
-  // por legajo, o por nombre completo. La contrasena debe coincidir con el legajo.
   var u=user.toLowerCase();
   var local=getUsers().find(function(x){
     return (x.username&&x.username.toLowerCase()===u)
@@ -121,7 +100,6 @@ function doLogin(){
     return;
   }
 
-  // Guardar mapeo usuario → legajo para pre-carga de firma en proximos logins
   localStorage.setItem('umap_'+u,String(local.legajo));
 
   var sigCv=document.getElementById('login-sig');
@@ -196,7 +174,7 @@ function prefillInspector(){
     var img=new Image();
     img.onload=function(){
       var ctx=cv.getContext('2d');
-      var isEmpty=!ctx.getImageData(0,0,cv.width,cv.height).data.some(function(x){return x!==0;});
+      var isEmpty=isCanvasBlank(cv);
       if(isEmpty){ctx.clearRect(0,0,cv.width,cv.height);ctx.drawImage(img,0,0,cv.width,cv.height);}
     };
     img.src=insp.firma;
@@ -209,10 +187,7 @@ function prefillInspector(){
   }
 }
 
-// ── PRE-COMPLETADO DEL PARRAFO INICIAL ────────────────────────────────────────
-// Inspecciona los <p class="narr"> del formulario activo y completa los inputs
-// vacios de fecha, mes, anio, hora e inspector segun el texto que los precede.
-// Tambien rellena los campos "Dia / Mes / Ano / Hora-min" del acta de transito.
+// ── PRE-COMPLETADO DEL PARRAFO INICIAL ──
 function prefillNarrativa(formId){
   var f=document.getElementById(formId);
   if(!f)return;
@@ -235,22 +210,15 @@ function prefillNarrativa(formId){
     return t.toLowerCase();
   }
 
-  // 1) Inputs dentro de cada parrafo narrativo
   f.querySelectorAll('p.narr').forEach(function(p){
     p.querySelectorAll('input').forEach(function(inp){
-      if(inp.value)return; // no pisar lo que el usuario ya escribio
+      if(inp.value && inp.value !== inp.defaultValue) return;
       var antes=textoAntes(inp);
-      // Dia: el texto previo termina en "a los" o "los"
       if(/(?:a\s+)?los\s*$/.test(antes)){inp.value=dia;return;}
-      // Mes: "del mes" o "del mes de"
       if(/mes(?:\s+de)?\s*$/.test(antes)){inp.value=mes;return;}
-      // Anio (2 digitos): precedido por "dos mil", "de 20", "ano 20"
       if(/(?:dos\s+mil|de\s+20|ano\s+20)\s*$/.test(antes)){inp.value=anio2;return;}
-      // Anio (4 digitos): "del ano" sin 20 despues
       if(/del\s+ano\s*$/.test(antes)){inp.value=anioFull;return;}
-      // Hora: "siendo las"
       if(/siendo\s+las\s*$/.test(antes)){inp.value=hora;return;}
-      // Inspector: en form-oi ("que suscribe") o form-ins ("el Inspector")
       if(insp&&insp.nombre){
         if(/que\s+suscribe\s*$/.test(antes)||/el\s+inspector\s*$/.test(antes)){
           inp.value=insp.nombre;return;
@@ -259,12 +227,11 @@ function prefillNarrativa(formId){
     });
   });
 
-  // 2) Caso especial: acta de transito (form-st) usa labels separados Dia / Mes / Ano / Hora-min
   f.querySelectorAll('.f').forEach(function(field){
     var label=field.querySelector('label');
     if(!label)return;
     var inp=field.querySelector('input');
-    if(!inp||inp.value)return;
+    if(!inp||(inp.value && inp.value !== inp.defaultValue))return;
     var l=label.textContent.toLowerCase().trim();
     if(l==='dia')inp.value=dia;
     else if(l==='mes')inp.value=mes;
@@ -295,90 +262,73 @@ function setTipo(t){
   var hb=document.querySelector('.hdr-bar');
   if(hb){hb.className='hdr-bar'+(TIPOS[t].color?' tipo-'+TIPOS[t].color:'');}
   loadNum();
-  document.querySelectorAll('#'+TIPOS[t].form+' .map-canvas').forEach(function(cv){initMapCanvas(cv.id,cv.dataset.style);});
+  // Inicializar mapas solo si no estaban inicializados
+  document.querySelectorAll('#'+TIPOS[t].form+' .map-canvas').forEach(function(cv){
+    if(!_mapInited[cv.id]){
+      _mapInited[cv.id] = true;
+      initMapCanvas(cv.id,cv.dataset.style);
+    }
+  });
   setTimeout(function(){prefillInspector();prefillNarrativa(TIPOS[t].form);},100);
 }
 
-// ── NUMERACION ──
+// ── NUMERACION LOCAL ──
 function getSeqLocal(p){return parseInt(localStorage.getItem('seq_'+p.replace(/-/g,''))||'0');}
 function setSeqLocal(p,n){localStorage.setItem('seq_'+p.replace(/-/g,''),n);}
 
-// Muestra el ultimo numero conocido (cache local) como referencia visual
 function loadNum(){var n=Math.max(1,getSeqLocal(TIPOS[tipo].pref));document.getElementById('num-acta').value=String(n).padStart(6,'0');}
 
-// Reserva el siguiente numero de forma atomica en Firebase (compartido entre todos los inspectores)
-function getNextRemoteSeq(prefix){
-  var key=prefix.replace(/-/g,'');
-  return new Promise(function(resolve,reject){
-    _fbDb.ref('contadores/'+key).transaction(function(current){
-      return (current||0)+1;
-    },function(error,committed,snapshot){
-      if(error)reject(error);
-      else if(!committed)reject(new Error('Transaccion no completada'));
-      else resolve(snapshot.val());
-    });
-  });
+function nuevaActa(){
+  var n=getSeqLocal(TIPOS[tipo].pref)+1;
+  setSeqLocal(TIPOS[tipo].pref,n);
+  document.getElementById('num-acta').value=String(n).padStart(6,'0');
+  limpiar(false);
+  prefillInspector();
+  prefillNarrativa(TIPOS[tipo].form);
+  toast('Nueva acta N '+String(n).padStart(6,'0'));
 }
 
-async function nuevaActa(){
-  if(!_fbDb){
-    // Firebase no configurado: usar contador local (comportamiento anterior)
-    var n=getSeqLocal(TIPOS[tipo].pref)+1;
-    setSeqLocal(TIPOS[tipo].pref,n);
-    document.getElementById('num-acta').value=String(n).padStart(6,'0');
-    limpiar(false);prefillInspector();prefillNarrativa(TIPOS[tipo].form);
-    toast('Nueva acta N '+String(n).padStart(6,'0')+' (modo local — configurar Firebase para numeracion compartida)');
-    return;
-  }
-  if(!navigator.onLine){
-    toast('Sin conexion a internet. Necesitas conexion para reservar un numero de acta.');
-    return;
-  }
-  var btns=document.querySelectorAll('.btn-nueva');
-  btns.forEach(function(b){b.disabled=true;b.textContent='Obteniendo numero...';});
-  toast('Reservando numero de acta...',9000);
-  try{
-    var n=await getNextRemoteSeq(TIPOS[tipo].pref);
-    setSeqLocal(TIPOS[tipo].pref,n);
-    document.getElementById('num-acta').value=String(n).padStart(6,'0');
-    limpiar(false);prefillInspector();prefillNarrativa(TIPOS[tipo].form);
-    toast('Nueva acta N '+String(n).padStart(6,'0'));
-  }catch(err){
-    console.error(err);
-    toast('Error al reservar numero. Verificar conexion a internet.');
-  }
-  btns.forEach(function(b){b.disabled=false;b.textContent='+ Nueva acta';});
-}
-
-// ── CAPTURA PDF (FIX PRINCIPAL) ─────────────────────────────────────────────
-// html2canvas clona el DOM pero pierde los valores asignados por JavaScript
-// (como el nombre del inspector y el numero de acta).
-// La solucion es usar 'onclone' para sincronizar los valores antes de renderizar.
+// ── CAPTURA PDF ──
 function syncDOM(origEl, clonedEl){
   // Inputs de texto
   var origInputs=origEl.querySelectorAll('input:not([type=checkbox]):not([type=radio])');
   var clonInputs=clonedEl.querySelectorAll('input:not([type=checkbox]):not([type=radio])');
-  origInputs.forEach(function(inp,i){
-    if(clonInputs[i]){
-      clonInputs[i].setAttribute('value',inp.value);
-      clonInputs[i].value=inp.value;
-    }
-  });
+  for(var i=0;i<origInputs.length && i<clonInputs.length;i++){
+    clonInputs[i].setAttribute('value',origInputs[i].value);
+    clonInputs[i].value=origInputs[i].value;
+  }
+  
+  // Checkboxes
+  var origCheck = origEl.querySelectorAll('input[type=checkbox]');
+  var clonCheck = clonedEl.querySelectorAll('input[type=checkbox]');
+  for(var i=0;i<origCheck.length && i<clonCheck.length;i++){
+    if(origCheck[i].checked) clonCheck[i].setAttribute('checked','checked');
+    else clonCheck[i].removeAttribute('checked');
+  }
+  
+  // Radios
+  var origRadio = origEl.querySelectorAll('input[type=radio]');
+  var clonRadio = clonedEl.querySelectorAll('input[type=radio]');
+  for(var i=0;i<origRadio.length && i<clonRadio.length;i++){
+    if(origRadio[i].checked) clonRadio[i].setAttribute('checked','checked');
+    else clonRadio[i].removeAttribute('checked');
+  }
+  
   // Textareas
   var origTas=origEl.querySelectorAll('textarea');
   var clonTas=clonedEl.querySelectorAll('textarea');
-  origTas.forEach(function(ta,i){
-    if(clonTas[i]){
-      clonTas[i].textContent=ta.value;
-      clonTas[i].value=ta.value;
-    }
-  });
+  for(var i=0;i<origTas.length && i<clonTas.length;i++){
+    clonTas[i].textContent=origTas[i].value;
+    clonTas[i].value=origTas[i].value;
+  }
+  
   // Selects
   var origSels=origEl.querySelectorAll('select');
   var clonSels=clonedEl.querySelectorAll('select');
-  origSels.forEach(function(sel,i){
-    if(clonSels[i])clonSels[i].selectedIndex=sel.selectedIndex;
-  });
+  for(var i=0;i<origSels.length && i<clonSels.length;i++){
+    clonSels[i].selectedIndex=origSels[i].selectedIndex;
+  }
+  
   // Fix layout en el clon
   var numBox=clonedEl.querySelector('.num-box');
   if(numBox){numBox.style.flexShrink='0';numBox.style.minWidth='fit-content';}
@@ -409,7 +359,6 @@ async function captureActa(){
       if(!origEl||!clonedEl)return;
       syncDOM(origEl,clonedEl);
 
-      // Fix numero de acta: reemplazar inputs con un span simple
       var numBox=clonedEl.querySelector('.num-box');
       var origPref=document.querySelector('.num-pref');
       var origNum=document.getElementById('num-acta');
@@ -422,7 +371,6 @@ async function captureActa(){
         numBox.style.flexShrink='0';
       }
 
-      // Fix autofill: forzar fondo blanco en todos los inputs del clon
       clonedEl.querySelectorAll('input,select,textarea').forEach(function(inp){
         inp.style.backgroundColor='#ffffff';
         inp.style.webkitTextFillColor='#1a1a2e';
@@ -430,8 +378,6 @@ async function captureActa(){
         inp.style.boxShadow='0 0 0 1000px #ffffff inset';
       });
 
-      // Fix campos .f: html2canvas no renderiza texto en inputs normales,
-      // reemplazar con spans que muestran el valor como texto visible
       clonedEl.querySelectorAll('.f').forEach(function(fEl){
         fEl.querySelectorAll('input:not([type=checkbox]):not([type=radio])').forEach(function(inp){
           var span=clonedDoc.createElement('span');
@@ -447,7 +393,6 @@ async function captureActa(){
         });
       });
 
-      // Fix nombre inspector y aclaraciones: reemplazar input por div para evitar corte
       clonedEl.querySelectorAll('.sig-acl').forEach(function(acl){
         var inp=acl.querySelector('input');
         if(!inp)return;
@@ -459,15 +404,14 @@ async function captureActa(){
     }
   });
 }
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ── MAPA DIBUJABLE ──
+// ── MAPA DIBUJABLE (con prevencion de reinicializacion) ──
 function initMapCanvas(id,style){
   var cv=document.getElementById(id);
-  if(!cv||cv._mapInited)return;
-  cv._mapInited=true;
+  if(!cv) return;
   var ctx=cv.getContext('2d');
   var W=cv.width,H=cv.height;
+  
   function drawBg(){
     ctx.fillStyle='#ffffff';ctx.fillRect(0,0,W,H);
     if(style==='grid'){
@@ -487,16 +431,32 @@ function initMapCanvas(id,style){
     ctx.textAlign='left';ctx.fillText('O',6,H/2+fs/3);
     ctx.textAlign='right';ctx.fillText('E',W-6,H/2+fs/3);
   }
+  
   drawBg();
   var bgData=ctx.getImageData(0,0,W,H);
   var drawing=false,lx=0,ly=0,tool='draw';
+  
   cv._setTool=function(t){tool=t;};
   cv._clearMap=function(){ctx.putImageData(bgData,0,0);};
-  function getPos(e){var r=cv.getBoundingClientRect(),sx=W/r.width,sy=H/r.height,s=e.touches?e.touches[0]:e;return[(s.clientX-r.left)*sx,(s.clientY-r.top)*sy];}
-  function down(e){e.preventDefault();drawing=true;var p=getPos(e);lx=p[0];ly=p[1];}
+  
+  function getPos(e){
+    var r=cv.getBoundingClientRect(),sx=W/r.width,sy=H/r.height;
+    var s=e.touches?e.touches[0]:e;
+    return[(s.clientX-r.left)*sx,(s.clientY-r.top)*sy];
+  }
+  
+  function down(e){
+    e.preventDefault();
+    drawing=true;
+    var p=getPos(e);
+    lx=p[0];ly=p[1];
+  }
+  
   function move(e){
-    if(!drawing)return;e.preventDefault();
-    var p=getPos(e);var x=p[0],y=p[1];
+    if(!drawing) return;
+    e.preventDefault();
+    var p=getPos(e);
+    var x=p[0],y=p[1];
     if(tool==='erase'){
       var r=W*0.07;
       var tmp=document.createElement('canvas');tmp.width=W;tmp.height=H;
@@ -509,9 +469,17 @@ function initMapCanvas(id,style){
     }
     lx=x;ly=y;
   }
+  
   function up(){drawing=false;}
-  cv.addEventListener('mousedown',down);cv.addEventListener('mousemove',move);cv.addEventListener('mouseup',up);cv.addEventListener('mouseleave',up);
-  cv.addEventListener('touchstart',down,{passive:false});cv.addEventListener('touchmove',move,{passive:false});cv.addEventListener('touchend',up);cv.addEventListener('touchcancel',up);
+  
+  cv.addEventListener('mousedown',down);
+  cv.addEventListener('mousemove',move);
+  cv.addEventListener('mouseup',up);
+  cv.addEventListener('mouseleave',up);
+  cv.addEventListener('touchstart',down,{passive:false});
+  cv.addEventListener('touchmove',move,{passive:false});
+  cv.addEventListener('touchend',up);
+  cv.addEventListener('touchcancel',up);
 }
 
 function mtool(btn){
@@ -544,7 +512,7 @@ function tog(sid,iid){var v=document.getElementById(sid).value;var i=document.ge
 function limpiar(doToast){
   if(doToast===undefined)doToast=true;
   var f=document.getElementById(TIPOS[tipo].form);
-  f.querySelectorAll('input:not([type=checkbox]):not([type=radio])').forEach(function(el){el.value=el.defaultValue||'';});
+  f.querySelectorAll('input:not([type=checkbox]):not([type=radio])').forEach(function(el){el.value='';});
   f.querySelectorAll('textarea').forEach(function(el){el.value='';});
   f.querySelectorAll('select').forEach(function(el){el.selectedIndex=0;});
   f.querySelectorAll('input[type=checkbox]').forEach(function(el){el.checked=false;});
@@ -552,7 +520,6 @@ function limpiar(doToast){
   f.querySelectorAll('.otro-inp').forEach(function(el){el.style.display='none';});
   f.querySelectorAll('.sig-canvas').forEach(function(cv){cv.getContext('2d').clearRect(0,0,cv.width,cv.height);});
   f.querySelectorAll('.map-canvas').forEach(function(cv){if(cv._clearMap)cv._clearMap();});
-  // Re-aplicar pre-completado de inspector y parrafo inicial
   prefillInspector();
   prefillNarrativa(TIPOS[tipo].form);
   if(doToast)toast('Formulario limpiado');
@@ -573,11 +540,8 @@ async function sendWA(){
   toast('Generando PDF...',9000);
   try{
     var r=await buildPDF();
-    // 1. Descargar el PDF en el dispositivo
     r.pdf.save(r.filename);
-    // 2. Pequeña pausa para que el navegador procese la descarga
     await new Promise(function(res){setTimeout(res,700);});
-    // 3. Abrir WhatsApp al número específico (sin texto, chat limpio)
     window.open('https://wa.me/'+num,'_blank');
     toast('PDF guardado. Adjuntalo en el chat que se abrio.',5000);
   }catch(err){
@@ -644,13 +608,12 @@ async function descargar(){
   try{
     var r=await buildPDF();
     r.pdf.save(r.filename);
-    // El numero fue reservado al presionar "Nueva Acta" — no se incrementa aqui
     toast('PDF guardado correctamente');
   }catch(err){console.error(err);toast('Error al generar PDF');}
   btn.disabled=false;btn.textContent='Guardar y Descargar PDF';
 }
 
-// ── BACKOFFICE ──────────────────────────────────────────────────
+// ── BACKOFFICE ──
 var _boEditLegajo=null;
 
 function openBackoffice(){
@@ -670,9 +633,9 @@ function boRenderTable(){
   var areaColors={hab:'#1a6bb5',obr:'#b7770d',seg:'#7b2d8b',amb:'#2d8b4a',bro:'#c05a39'};
   var html='';
   if(!users.length){
-    html='<div class="bo-empty">No hay usuarios registrados. Creá el primero.</div>';
+    html='<div class="bo-empty">No hay usuarios registrados. Crea el primero.</div>';
   } else {
-    html='<table class="bo-table"><thead><tr><th>Nombre</th><th>Área</th><th>Cargo</th><th style="text-align:center">Firma</th><th>Acciones</th></tr></thead><tbody>';
+    html='<table class="bo-table"><thead><tr><th>Nombre</th><th>Area</th><th>Cargo</th><th style="text-align:center">Firma</th><th>Acciones</th></tr></thead><tbody>';
     users.forEach(function(u){
       var aLabel=AREAS[u.area]?AREAS[u.area].label:u.area;
       var aColor=areaColors[u.area]||'#555';
@@ -713,7 +676,7 @@ function boShowForm(legajo){
   document.getElementById('bo-f-cargo').value=u?u.cargo:'';
   document.getElementById('bo-f-clave').value='';
   document.getElementById('bo-f-clave2').value='';
-  document.getElementById('bo-f-clave').placeholder=u?'Dejar vacío para no cambiar':'Nueva clave';
+  document.getElementById('bo-f-clave').placeholder=u?'Dejar vacio para no cambiar':'Nueva clave';
   document.getElementById('bo-clave-lbl').textContent=u?'Nueva clave (opcional)':'Clave *';
   document.getElementById('bo-err').textContent='';
   var fw=document.getElementById('bo-form-wrap');
@@ -729,7 +692,7 @@ function boSaveUser(){
   var clave=document.getElementById('bo-f-clave').value;
   var clave2=document.getElementById('bo-f-clave2').value;
   var errEl=document.getElementById('bo-err');
-  if(!nombre||!legajo||!area){errEl.textContent='Nombre, legajo y área son obligatorios';return;}
+  if(!nombre||!legajo||!area){errEl.textContent='Nombre, legajo y area son obligatorios';return;}
   if(clave&&clave!==clave2){errEl.textContent='Las claves no coinciden';return;}
   if(!_boEditLegajo&&!clave){errEl.textContent='La clave es obligatoria para un nuevo usuario';return;}
   var users=getUsers();
@@ -751,7 +714,7 @@ function boSaveUser(){
 }
 
 function boDeleteUser(legajo){
-  if(!confirm('¿Eliminar este usuario? Esta acción no se puede deshacer.'))return;
+  if(!confirm('¿Eliminar este usuario? Esta accion no se puede deshacer.'))return;
   saveUsers(getUsers().filter(function(u){return u.legajo!==legajo;}));
   boRenderTable();
   toast('Usuario eliminado');
@@ -781,15 +744,14 @@ function boImport(e){
   reader.onload=function(ev){
     try{
       var users=JSON.parse(ev.target.result);
-      if(!Array.isArray(users)||!users.length)throw new Error('Formato inválido');
-      if(!confirm('Esto reemplazará los '+users.length+' usuarios del archivo. ¿Continuar?'))return;
+      if(!Array.isArray(users)||!users.length)throw new Error('Formato invalido');
+      if(!confirm('Esto reemplazara los '+users.length+' usuarios del archivo. ¿Continuar?'))return;
       saveUsers(users);boRenderTable();toast('Importados '+users.length+' usuarios');
     }catch(err){alert('Error al importar: '+err.message);}
   };
   reader.readAsText(file);
   e.target.value='';
 }
-// ────────────────────────────────────────────────────────────────
 
 // ── AUTO-RESIZE TEXTAREAS ──
 function autoResizeTa(ta){ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';}
@@ -797,28 +759,9 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
   ta.addEventListener('input',function(){autoResizeTa(this);});
 });
 
-// ── DICTADO POR VOZ (Web Speech API) ─────────────────────────────────────────
-// Agrega un boton de microfono a las textareas de "Observaciones" / "diferencias"
-// para permitir el dictado de texto, util sobre todo en uso desde el celular.
-// Soporte: Chrome/Edge (Android, desktop) y Safari (iOS 14.5+).
+// ── DICTADO POR VOZ ──
 (function(){
-  function textoEtiquetaCercana(ta){
-    // 1) label dentro del contenedor .f
-    var cont=ta.closest('.f');
-    if(cont){
-      var lbl=cont.querySelector('label');
-      if(lbl&&lbl.textContent)return lbl.textContent;
-    }
-    // 2) un .hdr-sec previo al contenedor (caso del acta de transito)
-    var prev=cont?cont.previousElementSibling:ta.previousElementSibling;
-    while(prev){
-      if(prev.classList&&prev.classList.contains('hdr-sec'))return prev.textContent||'';
-      prev=prev.previousElementSibling;
-    }
-    return '';
-  }
   function esDictable(ta){
-    // El boton de microfono aparece en TODAS las textareas dentro del acta
     return !!ta.closest('.acta');
   }
   function crearReconocedor(){
@@ -832,7 +775,6 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
   }
   function attachDictado(ta){
     var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    // Envolver la textarea con un wrapper relativo para posicionar el boton
     var wrap=document.createElement('div');
     wrap.className='dict-wrap';
     ta.parentNode.insertBefore(wrap,ta);
@@ -863,7 +805,7 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
       if(grabando){try{rec&&rec.stop();}catch(_){}return;}
       rec=crearReconocedor();
       if(!rec)return;
-      baseText=(ta.value||'').toUpperCase();
+      baseText=(ta.value||'');
       if(baseText&&!/\s$/.test(baseText))baseText+=' ';
       rec.onresult=function(ev){
         var interim='',finales='';
@@ -872,12 +814,8 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
           if(r.isFinal)finales+=r[0].transcript;
           else interim+=r[0].transcript;
         }
-        // Forzar mayusculas en lo dictado (acta oficial)
-        finales=finales.toUpperCase();
-        interim=interim.toUpperCase();
         if(finales){baseText+=finales+(/\s$/.test(finales)?'':' ');}
-        ta.value=(baseText+interim).toUpperCase();
-        // Disparar evento input para que el auto-resize y demas listeners reaccionen
+        ta.value=(baseText+interim);
         ta.dispatchEvent(new Event('input',{bubbles:true}));
       };
       rec.onerror=function(ev){
@@ -910,12 +848,8 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);
   else init();
 })();
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ── MAYUSCULAS AUTOMATICAS EN ACTAS ──────────────────────────────────────────
-// Todo lo que el inspector escriba o dicte dentro de un acta se guarda en
-// MAYUSCULAS (como corresponde a un acta oficial). Se excluyen mail, tel y
-// los campos con clase "no-upper" si los hubiera.
+// ── MAYUSCULAS AUTOMATICAS EN ACTAS ──
 (function(){
   function debeMayuscular(el){
     if(!el||!el.closest)return false;
@@ -924,7 +858,6 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
     var tag=(el.tagName||'').toLowerCase();
     if(tag!=='input'&&tag!=='textarea')return false;
     var type=(el.getAttribute('type')||'text').toLowerCase();
-    // No transformar campos donde mayuscular romperia el dato
     if(type==='email'||type==='tel'||type==='password'||type==='url'||type==='number'||type==='date'||type==='time')return false;
     return true;
   }
@@ -933,7 +866,6 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
     if(typeof v!=='string')return;
     var u=v.toUpperCase();
     if(u===v)return;
-    // Preservar posicion del cursor
     var s=el.selectionStart,e=el.selectionEnd;
     el.value=u;
     try{el.setSelectionRange(s,e);}catch(_){}
@@ -943,16 +875,8 @@ document.querySelectorAll('.f textarea').forEach(function(ta){
     if(debeMayuscular(t))aMayus(t);
   },true);
 })();
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ── INIT ──
 checkLogin();
 document.getElementById('login-sig').addEventListener('touchstart',function(){document.getElementById('sig-hint').style.display='none';},{passive:true});
 document.getElementById('login-sig').addEventListener('mousedown',function(){document.getElementById('sig-hint').style.display='none';});
-
-// ── SERVICE WORKER ──
-if('serviceWorker' in navigator){
-  window.addEventListener('load',function(){
-    navigator.serviceWorker.register('./sw.js').catch(function(){});
-  });
-}
