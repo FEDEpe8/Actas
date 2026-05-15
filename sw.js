@@ -24,7 +24,7 @@ self.addEventListener('install', e => {
   self.skipWaiting();
 });
 
-// Activación
+// Activación - limpiar caches viejos
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys => {
@@ -59,7 +59,9 @@ self.addEventListener('message', event => {
   // Responder inmediatamente para que no se cierre el canal
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
-    event.ports[0]?.postMessage({ status: 'ok' });
+    if (event.ports && event.ports[0]) {
+      event.ports[0].postMessage({ status: 'ok' });
+    }
   }
   
   // Siempre responder para mantener el canal abierto
